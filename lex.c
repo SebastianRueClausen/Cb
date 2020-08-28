@@ -9,9 +9,8 @@
 #include <stdbool.h>
 
 void
-lex_load_file_buffer(
-	struct lex_file_buffer* file_buffer, const char* filename
-)
+lex_load_file_buffer(struct lex_file_buffer* file_buffer,
+							const char* filename)
 {
 	FILE* file = fopen(filename, "r");
 	assert(file);
@@ -66,36 +65,6 @@ next(struct lex_file_buffer* file_buffer)
 }
 
 static char
-peek(struct lex_file_buffer* const file_buffer, uint32_t n)
-{
-	char c;
-
-	if (file_buffer->curr + n <= file_buffer->end) {
-		c = file_buffer->curr[n];
-	}
-	else {
-		c = '\0';
-	}
-	
-	return c;
-}
-
-static bool
-cmp(struct lex_file_buffer* const file_buffer, const char* str)
-{
-	uint32_t i = 0;
-
-	while (str[i]) {
-		if (str[i] != peek(file_buffer, i))
-			return false;
-
-		++i;
-	}
-
-	return true;
-}
-
-static char
 skip_single_line_comment(struct lex_file_buffer* file_buffer)
 {
 	char c = *file_buffer->curr;
@@ -112,112 +81,116 @@ skip_single_line_comment(struct lex_file_buffer* file_buffer)
 static char
 skip_multi_line_comment(struct lex_file_buffer* file_buffer)
 {
-	char c = *file_buffer->curr;
-
 	// skip opening /*
-	c = next(file_buffer);
-	c = next(file_buffer);
+	next(file_buffer);
+	next(file_buffer);
 
-	while (!cmp(file_buffer, "*/")) {
-		c = next(file_buffer);	
-		
-		if (!c) {
-			fatal_error("Syntax Error: Unexpected end of file in comment\n");
+	while (file_buffer->curr != file_buffer->end) {
+		if (file_buffer->curr[0] == '*') {
+			if (file_buffer->curr[1] == '/') {
+				file_buffer->curr += 2;
+				return *file_buffer->curr;
+			}
 		}
+		next(file_buffer);
 	}
 
-	// skip closing */
-	c = next(file_buffer);
-	c = next(file_buffer);
-	
-	return c;
+	fatal_error("Syntax Error: Unexpected end of file in comment\n");
+	assert(false);
 }
 
 static char
 skip_whitespace_and_comments(struct lex_file_buffer* file_buffer)
 {
-	char c;
-
-	c = *file_buffer->curr;;
-
 	for (;;) {
-		switch (c) {
+		switch (*file_buffer->curr) {
 			case ' ': case '\n': case '\t':
 			case '\r': case '\v': case '\f': {
-				c = next(file_buffer);
+				next(file_buffer);
 			}
 			break;
 
 			case '/': {
-				if (cmp(file_buffer, "/*")) {
-					c = skip_multi_line_comment(file_buffer);
+				if (file_buffer->curr[1] == '*') {
+					skip_multi_line_comment(file_buffer);
 				}
-				else if (cmp(file_buffer, "//")) {
-					c = skip_single_line_comment(file_buffer);
+				else if (file_buffer->curr[1] == '/') {
+					skip_single_line_comment(file_buffer);
+				}
+				else {
+					return *file_buffer->curr;
 				}
 			}
 			break;
 
 			default: {
-				return c;
+				return *file_buffer->curr;
 			}
 		}
 	}
 }
 
-static bool
-is_numeric(char c)
-{
-	if (c >= '0' && c <= '9') {
-		return true;
-	}
-	else {
-		return false;
-	}
-}
-
-static bool
-is_letter(char c)
-{
-	if (c >= 'A' && c <= 'Z')
-		return true;
-
-	if (c >= 'a' && c <= 'z')
-		return true;
-
-	if (c == '_')
-		return true;
-
-	return false;
-}
-
 static uint32_t
-word_len(const struct lex_file_buffer* file_buffer)
+word_len(const char* str)
 {
-	char* str = file_buffer->curr;
 	uint32_t i = 0;
 	
 	while (str[i]) {
-		if (!is_letter(str[i]) && !is_numeric(str[i]))
+		if (isalpha(str[i]) || str[i] == '_')
+			++i;
+		else
 			return i;
-		++i;
 	}
 
+	fatal_error("Error: Unexpected end of file");
 	assert(false);
 }
 
 static uint32_t
-number_len(const struct lex_file_buffer* file_buffer)
+number_len(const char* str)
 {
-	char* str = file_buffer->curr;
 	uint32_t i = 0;
 
 	while (str[i]) {
-		if (!is_numeric(str[i]) && str[i] != '.')
+		if (isdigit(str[i]) || str[i] == '.')
+			++i;
+		else
 			return i;
-		++i;
 	}
 
+	fatal_error("Error: Unexpected end of file");
+	assert(false);
+}
+
+static uint32_t
+string_len(const char* str)
+{
+	uint32_t i = 0;
+
+	while (str[i]) {
+		if (str[i] != '"')
+			++i;
+		else
+			return i;
+	}
+
+	fatal_error("Error: Unexpected end of file inside string");
+	assert(false);
+}
+
+static uint32_t
+char_len(const char* str)
+{
+	uint32_t i = 0;
+
+	while (str[i]) {
+		if (str[i] != '\'')
+			++i;
+		else
+			return i;
+	}
+
+	fatal_error("Error: Unexpected end of file inside string");
 	assert(false);
 }
 
@@ -252,204 +225,294 @@ parse_numeric_constant(const char* str, uint32_t len, int64_t* val)
 	return TOK_CONSTANT_FLOAT;
 }
 
+static bool
+str_cmp(const char* str1, const char* str2, uint32_t len1, uint32_t len2)
+{
+	if (len1 != len2)
+		return false;
+
+	for (uint32_t i = 0; i < len1; ++i) {
+		if (str1[i] != str2[i])
+			return false;
+	}
+
+	return true;
+}
+
 static enum lex_token_type
 lookup_keyword(const char* str, uint32_t len)
 {
 	switch (*str) {
 		case 'i':
-			if (!strncmp(str, "if", len)) {
-				printf("len %u\n", len);
+			if (str_cmp(str, "if", len, 2)) {
 				return TOK_KEY_IF;
 			}
-			if (!strncmp(str, "int", len))
+			if (str_cmp(str, "int", len, 3))
 				return TOK_KEY_INT;
 			break;
 		case 'e':
-			if (!strncmp(str, "else", len))
+			if (str_cmp(str, "else", len, 4))
 				return TOK_KEY_ELSE;
-			if (!strncmp(str, "enum", len))
+			if (str_cmp(str, "enum", len, 4))
 				return TOK_KEY_ENUM;
-			if (!strncmp(str, "extern", len))
+			if (str_cmp(str, "extern", len, 6))
 				return TOK_KEY_EXTERN;
 			break;
 		case 'w':
-			if (!strncmp(str, "while", len))
+			if (str_cmp(str, "while", len, 5))
 				return TOK_KEY_WHILE;
 			break;
 		case 'f':
-			if (!strncmp(str, "for", len))
+			if (str_cmp(str, "for", len, 3))
 				return TOK_KEY_FOR;
-			if (!strncmp(str, "float", len))
+			if (str_cmp(str, "float", len, 5))
 				return TOK_KEY_FLOAT;
 			break;
 		case 's':
-			if (!strncmp(str, "switch", len))
+			if (str_cmp(str, "switch", len, 6))
 				return TOK_KEY_SWITCH;
-			if (!strncmp(str, "struct", len))
+			if (str_cmp(str, "struct", len, 6))
 				return TOK_KEY_STRUCT;
-			if (!strncmp(str, "static", len))
+			if (str_cmp(str, "static", len, 6))
 				return TOK_KEY_STATIC;
-			if (!strncmp(str, "sizeof", len))
+			if (str_cmp(str, "sizeof", len, 6))
 				return TOK_KEY_SIZEOF;
+			if (str_cmp(str, "short", len, 5))
+				return TOK_KEY_SHORT;
+			if (str_cmp(str, "signed", len, 6))
+				return TOK_KEY_SIGNED;;
 			break;
 		case 'c':
-			if (!strncmp(str, "char", len))
+			if (str_cmp(str, "char", len, 4))
 				return TOK_KEY_CHAR;
-			if (!strncmp(str, "const", len))
+			if (str_cmp(str, "const", len, 5))
 				return TOK_KEY_CONST;
-			if (!strncmp(str, "case", len))
+			if (str_cmp(str, "case", len, 4))
 				return TOK_KEY_CASE;
-			if (!strncmp(str, "continue", len))
+			if (str_cmp(str, "continue", len, 8))
 				return TOK_KEY_CONTINUE;
 			break;
 		case 'b':
-			if (!strncmp(str, "break", len))
+			if (str_cmp(str, "break", len, 5))
 				return TOK_KEY_BREAK;
 			break;
 		case 'r':
-			if (!strncmp(str, "return", len))
+			if (str_cmp(str, "return", len, 6))
 				return TOK_KEY_RETURN;
+			if (str_cmp(str, "register", len, 8))
+				return TOK_KEY_REGISTER;
 			break;
 		case 'd':
-			if (!strncmp(str, "double", len))
-				return TOK_KEY_DOUBLE;
-			if (!strncmp(str, "default", len))
-				return TOK_KEY_DEFAULT;
-			if (!strncmp(str, "do", len))
+			if (str_cmp(str, "do", len, 2))
 				return TOK_KEY_DO;
+			if (str_cmp(str, "double", len, 6))
+				return TOK_KEY_DOUBLE;
+			if (str_cmp(str, "default", len, 7))
+				return TOK_KEY_DEFAULT;
 			break;
 		case 'l':
-			if (!strncmp(str, "long", len))
+			if (str_cmp(str, "long", len, 4))
 				return TOK_KEY_LONG;
 			break;
 		case 'u':
-			if (!strncmp(str, "union", len))
+			if (str_cmp(str, "union", len, 5))
 				return TOK_KEY_UNION;
+			if (str_cmp(str, "unsigned", len, 8))
+				return TOK_KEY_UNSIGNED;
 			break;
 		case 't':
-			if (!strncmp(str, "typedef", len))
+			if (str_cmp(str, "typedef", len, 7))
 				return TOK_KEY_TYPEDEF;
 			break;
 		case 'v':
-			if (!strncmp(str, "void", len))
+			if (str_cmp(str, "void", len, 4))
 				return TOK_KEY_VOID;
+			if (str_cmp(str, "volatile", len, 8))
+				return TOK_KEY_VOLATILE;
 			break;
 		case 'g':
-			if (!strncmp(str, "goto", len))
+			if (str_cmp(str, "goto", len, 4))
 				return TOK_KEY_GOTO;
 			break;
+		default:
+			return TOK_IDENTIFIER;
 	}
-
+	
 	return TOK_IDENTIFIER;
 }
 
 
 static enum lex_token_type
-lookup_symbol(const char* str)
+lookup_symbol(const char* str, uint32_t* symbol_len)
 {
 	switch (*str) {
 		case '+':
-			if (str[1] == '=')
+			if (str[1] == '=') {
+				*symbol_len = 2;
 				return TOK_OP_PLUS_ASSIGN;
-			else if (str[1] == '+')
+			} else if (str[1] == '+') {
+				*symbol_len = 2;
 				return TOK_OP_INCREASE;
+			}
+			*symbol_len = 1;
 			return TOK_OP_PLUS;
 		case '-':
-			if (str[1] == '=')
+			if (str[1] == '=') {
+				*symbol_len = 2;
 				return TOK_OP_MINUS_ASSIGN;
-			else if (str[1] == '-')
+			} else if (str[1] == '-') {
+				*symbol_len = 2;
 				return TOK_OP_DECREASE;
-			else if (str[1] == '>')
+			} else if (str[1] == '>') {
+				*symbol_len = 2;
 				return TOK_CTRL_ARROW;
+			}
+			*symbol_len = 1;
 			return TOK_OP_MINUS;
 		case '/':
-			if (str[1] == '=')
+			if (str[1] == '=') {
+				*symbol_len = 2;
 				return TOK_OP_DIV_ASSIGN;
+			}
+			*symbol_len = 1;
 			return TOK_OP_DIV;
 		case '*':
-			if (str[1] == '=')
+			if (str[1] == '=') {
+				*symbol_len = 2;
 				return TOK_OP_STAR_ASSIGN;
+			}
+			*symbol_len = 1;
 			return TOK_OP_STAR;
 		case '%':
-			if (str[1] == '=')
+			if (str[1] == '=') {
+				*symbol_len = 2;
 				return TOK_OP_MOD_ASSIGN;
+			}
+			*symbol_len = 1;
 			return TOK_OP_MOD;
 		case '=':
-			if (str[1] == '=')
+			if (str[1] == '=') {
+				*symbol_len = 2;
 				return TOK_LOG_EQUAL;
+			}
+			*symbol_len = 1;
 			return TOK_OP_ASSIGN;
 		case '&':
-			if (str[1] == '=')
+			if (str[1] == '=') {
+				*symbol_len = 2;
 				return TOK_BIT_AMPERSAND_ASSIGN;
-			else if (str[1] == '&')
+			} else if (str[1] == '&') {
+				*symbol_len = 2;
 				return TOK_LOG_AND;
+			}
+			*symbol_len = 1;
 			return TOK_BIT_AMPERSAND;
 		case '|':
-			if (str[1] == '=')
+			if (str[1] == '=') {
+				*symbol_len = 2;
 				return TOK_BIT_OR_ASSIGN;
-			if (str[1] == '|')
+			} else if (str[1] == '|') {
+				*symbol_len = 2;
 				return TOK_LOG_OR;
+			}
+			*symbol_len = 1;
 			return TOK_BIT_OR;
 		case '~':
-			if (str[1] == '=')
+			if (str[1] == '=') {
+				*symbol_len = 2;
 				return TOK_BIT_NOT_ASSIGN;
+			}
+			*symbol_len = 1;
 			return TOK_BIT_NOT;
 		case '^':
-			if (str[1] == '=')
+			if (str[1] == '=') {
+				*symbol_len = 2;
 				return TOK_BIT_EOR_ASSIGN;
+			}
+			*symbol_len = 1;
 			return TOK_BIT_EOR;
 		case '>':
-			if (str[1] == '=')
+			if (str[1] == '=') {
+				*symbol_len = 2;
 				return TOK_LOG_GREATER_OR_EQUAL;
-			else if (str[1] == '>') {
-				if (str[2] == '=')
+			} else if (str[1] == '>') {
+				if (str[2] == '=') {
+					*symbol_len = 3;
 					return TOK_BIT_RIGHT_SHIFT_ASSIGN;
-				else
+				} else {
+					*symbol_len = 2;
 					return TOK_BIT_RIGHT_SHIFT;
+				}
 			}
+			*symbol_len = 1;
 			return TOK_LOG_GREATER;
 		case '<':
-			if (str[1] == '=')
+			if (str[1] == '=') {
+				*symbol_len = 2;
 				return TOK_LOG_LESSER_OR_EQUAL;
-			else if (str[1] == '<') {
-				if (str[2] == '=')
+			} else if (str[1] == '<') {
+				if (str[2] == '=') {
+					*symbol_len = 3;
 					return TOK_BIT_LEFT_SHIFT_ASSIGN;
-				else
+				} else {
+					*symbol_len = 2;
 					return TOK_BIT_LEFT_SHIFT;
+				}
 			}
+			*symbol_len = 1;
 			return TOK_LOG_LESSER;
 		case '(':
+			*symbol_len = 1;
 			return TOK_CTRL_PAREN_OPEN;
 		case ')':
+			*symbol_len = 1;
 			return TOK_CTRL_PAREN_CLOSED;
 		case '[':
+			*symbol_len = 1;
 			return TOK_CTRL_BRACKET_OPEN;
 		case ']':
+			*symbol_len = 1;
 			return TOK_CTRL_BRACKET_CLOSED;
 		case '{':
+			*symbol_len = 1;
 			return TOK_CTRL_BRACE_OPEN;
 		case '}':
+			*symbol_len = 1;
 			return TOK_CTRL_BRACE_CLOSED;
 		case '!':
-			if (str[1] == '=')
+			if (str[1] == '=') {
+				*symbol_len = 2;
 				return TOK_LOG_NOT_EQUAL;
-			return TOK_LOG_EQUAL;
+			}
+			*symbol_len = 1;
+			return TOK_LOG_NOT;
 		case ',':
+			*symbol_len = 1;
 			return TOK_CTRL_COMMA;
 		case '.':
 			if (str[1] == '.') {
-				if (str[2] == '.')
+				if (str[2] == '.') {
+					*symbol_len = 3;
 					return TOK_CTRL_ELLIPSIS;
+				}
 			}
+			*symbol_len = 1;
 			return TOK_CTRL_DOT;
 		case ';':
+			*symbol_len = 1;
 			return TOK_CTRL_SEMIKOLON;
 		case ':':
+			*symbol_len = 1;
 			return TOK_CTRL_KOLON;
 		case '?':
+			*symbol_len = 1;
 			return TOK_CTRL_QUERY;
+		case '\0':
+			*symbol_len = 0;
+			return TOK_EOF;
 	}
 
+	*symbol_len = 1;
 	return TOK_UNKNOWN;
 }
 
@@ -462,20 +525,36 @@ lex_next_token(struct lex_file_buffer* file_buffer)
 
 	c = skip_whitespace_and_comments(file_buffer);
 
-	if (is_letter(c)) {
-		token_len = word_len(file_buffer);
+	if (isalpha(c) || c == '_') {
+		token_len = word_len(file_buffer->curr);
 		token.type = lookup_keyword(file_buffer->curr, token_len);
 
 		file_buffer->curr += token_len;		
 	}
-	else if (is_numeric(c)) {
-		token_len = number_len(file_buffer);	
+	// We should check if there is a digit after after a '.'
+	else if (isdigit(c)) { 
+		token_len = number_len(file_buffer->curr);	
 		token.type = parse_numeric_constant(file_buffer->curr, 
 				token_len, &token.value_int);
 		file_buffer->curr += token_len;
 	}
+	else if (c == '"') {
+		token.type = TOK_CONSTANT_STRING;
+		// skip opening "
+		++file_buffer->curr;
+		token_len = string_len(file_buffer->curr);
+		// skip string and closing "
+		file_buffer->curr += token_len + 1;
+	}
+	else if (c == '\'') {
+		token.type = TOK_CONSTANT_CHAR;
+		++file_buffer->curr;
+		token_len = char_len(file_buffer->curr);
+		file_buffer->curr += token_len + 1;
+	}
 	else {
-		token.type = TOK_EOF;
+		token.type = lookup_symbol(file_buffer->curr, &token_len);
+		file_buffer->curr += token_len;
 	}
 
 	return token;
