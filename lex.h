@@ -7,7 +7,10 @@
 struct lex_file_buffer
 {
 	uint32_t line;
+	uint32_t col;
 
+	char* filename;
+	
 	char* start;
 	char* curr;
 	char* end;
@@ -121,7 +124,7 @@ enum lex_token_type
 	_TOK_COUNT
 };
 
-static const char* tok_to_str[_TOK_COUNT + 1] =
+static const char* lex_tok_to_str[_TOK_COUNT + 1] =
 {
 	"TOK_UNKNOWN",
 	"TOK_CONSTANT_INT",		
@@ -218,6 +221,7 @@ struct lex_token
 	{
 		int64_t value_int;
 		double value_float;
+		char value_char;
 	};
 };
 
