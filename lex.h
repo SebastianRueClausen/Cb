@@ -1,5 +1,7 @@
-#ifndef LEXER_H
-#define LEXER_H
+#ifndef LEX_H
+#define LEX_H
+
+#include "def.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -217,6 +219,8 @@ struct lex_token
 {
 	enum lex_token_type type;
 
+	struct err_location err_loc;
+
 	union
 	{
 		int64_t value_int;
@@ -227,11 +231,7 @@ struct lex_token
 
 void lex_load_file_buffer(struct lex_file_buffer* file_buffer,
 							const char* filename);
-
 void lex_destroy_file_buffer(struct lex_file_buffer* file_buffer);
-
-struct lex_token lex_next_token(struct lex_file_buffer* file_buffer);
-
-const char* lex_token_type_to_str(enum lex_token_type type);
+void lex_next_token(struct lex_file_buffer* file_buffer, struct lex_token* token);
 
 #endif

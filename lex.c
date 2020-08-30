@@ -1,5 +1,5 @@
 #include "lex.h"
-#include "gen.h"
+#include "def.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -563,7 +563,7 @@ lookup_keyword(const char* str, uint32_t len)
 
 
 static enum lex_token_type
-lookup_symbol(const char* str, uint32_t* symbol_len)
+lookup_symbol(const char* str, int* symbol_len)
 {
 	switch (*str) {
 		case '+':
@@ -736,44 +736,50 @@ lookup_symbol(const char* str, uint32_t* symbol_len)
 	return TOK_UNKNOWN;
 }
 
-struct lex_token
-lex_next_token(struct lex_file_buffer* file_buffer)
+void
+lex_next_token(struct lex_file_buffer* file_buffer, struct lex_token* token)
 {
 	char c;
-	uint32_t token_len;
-	struct lex_token token;
+	int token_len;
 
 	c = skip_whitespace_and_comments(file_buffer);
 
 	if (isalpha(c) || c == '_') {
 		token_len = word_len(file_buffer);
-		token.type = lookup_keyword(file_buffer->curr, token_len);
+		token->type = lookup_keyword(file_buffer->curr, token_len);
 		skip(file_buffer, token_len);
+		
+		token->err_loc = error_location(file_buffer);
 	}
 	// We should check if there is a digit after after a '.'
 	else if (isdigit(c)) { 
 		token_len = number_len(file_buffer);	
-		token.type = parse_decimal_constant(file_buffer->curr, 
-				token_len, &token.value_int);
+		token->type = parse_decimal_constant(file_buffer->curr, 
+				token_len, &token->value_int);
 		skip(file_buffer, token_len);
+
+		token->err_loc = error_location(file_buffer);
 	}
 	else if (c == '"') {
-		token.type = TOK_CONSTANT_STRING;
+		token->type = TOK_CONSTANT_STRING;
 		next(file_buffer);
 		token_len = string_len(file_buffer);
 		skip(file_buffer, token_len + 1);
+
+		token->err_loc = error_location(file_buffer);
 	}
 	else if (c == '\'') {
-		token.type = TOK_CONSTANT_CHAR;
+		token->type = TOK_CONSTANT_CHAR;
 		next(file_buffer);
 		token_len = char_len(file_buffer);
-		token.value_int = parse_char_literal(file_buffer, token_len);
+		token->value_int = parse_char_literal(file_buffer, token_len);
 		skip(file_buffer, token_len + 1);
+
+		token->err_loc = error_location(file_buffer);
 	}
 	else {
-		token.type = lookup_symbol(file_buffer->curr, &token_len);
+		token->type = lookup_symbol(file_buffer->curr, &token_len);
 		skip(file_buffer, token_len);
+		token->err_loc = error_location(file_buffer);
 	}
-
-	return token;
 }

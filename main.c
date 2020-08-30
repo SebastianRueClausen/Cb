@@ -1,4 +1,5 @@
 #include "lex.h"
+#include "ast.h"
 
 #include <stdio.h>
 
@@ -11,12 +12,12 @@ run_test1()
 
 	struct lex_token token;
 
-	lex_next_token(&file_buffer);
+	lex_next_token(&file_buffer, &token);
 
 	printf("Running test 1 : lex token type...\n");
 	for (int i = 0; i < _TOK_COUNT; ++i)
 	{
-		token = lex_next_token(&file_buffer);
+		lex_next_token(&file_buffer, &token);
 
 		if ((int)token.type == i) {
 			printf("Success : %s\n", lex_tok_to_str[i]);
@@ -71,7 +72,7 @@ run_test2()
 			++i
 		)
 	{
-		token = lex_next_token(&file_buffer);
+		lex_next_token(&file_buffer, &token);
 
 		if (expected_tokens[i] != token.type) {
 			printf("Failure : %s, i = %i : should have gotten : %s\n",
@@ -100,7 +101,7 @@ run_test3()
 	};
 
 	for (int i = 0; i < 9; ++i) {
-		token = lex_next_token(&file_buffer);
+		lex_next_token(&file_buffer, &token);
 		if (expected_values[i] != token.value_char) {
 			printf("Failure : expected = %i, result = %i\n", expected_values[i], token.value_char);
 		}
@@ -112,10 +113,27 @@ run_test3()
 	lex_destroy_file_buffer(&file_buffer);
 }
 
+extern struct ast_node*
+parse_expression(struct lex_file_buffer* fb, int prev_prec);
+
+static void
+run_test4()
+{
+	struct lex_file_buffer file_buffer;
+	struct lex_token token;
+
+	lex_load_file_buffer(&file_buffer, "../test/test4.c");
+
+	parse_expression(&file_buffer, 0);
+	
+}
+
 int main()
 {
-	run_test1();
-	run_test2();
-	run_test3();
+	// run_test1();
+	// run_test2();
+	// run_test3();
+	run_test4();
+	
 	return 0;
 }
