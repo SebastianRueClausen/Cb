@@ -1,29 +1,34 @@
 #ifndef SYM_H
 #define SYM_H
 
-enum sym_type
+#include <stdint.h>
+#include <stddef.h>
+
+struct sym_entry
 {
-	SYM_INT,
-	SYN_FLOAT
+	int64_t	hash;
 };
 
-struct sym_info
+struct sym_table
 {
-	char* name;
-	enum sym_type type;	
+	struct sym_entry*		entries;
+	size_t					entry_count;
+	size_t					entry_allocated;
 };
 
-struct sym_lookup_entry
-{
-	int hash;
-	struct sym_info* sym;
-};
+int64_t
+sym_hash(const char* key, int len);
 
-struct sym_lookup_table
-{
-	int count;	
-	struct sym_lookup_entry* symbols;
-};
+void
+sym_create_table(struct sym_table* table, size_t count);
 
+int
+sym_add_entry(struct sym_table* table, struct sym_entry entry);
+
+void
+sym_cleanup_table(struct sym_table* table);
+
+int
+sym_find_entry(const struct sym_table* table, int64_t hash);
 
 #endif

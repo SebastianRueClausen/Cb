@@ -7,4 +7,4 @@ enable_language(C)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_C_FLAGS "-Wall -Wextra")
 
-add_executable(Cb main.c ast.c def.c lex.c)
+add_executable(Cb main.c sym.c ast.c def.c lex.c)

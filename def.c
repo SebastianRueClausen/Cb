@@ -72,7 +72,7 @@ c_malloc(size_t size)
 	void* ptr = malloc(size);
 
 	if (!ptr)
-		fatal_error("Out of memory");
+		fatal_error("out of memory");
 
 	return ptr;
 }
@@ -83,7 +83,7 @@ c_realloc(void* ptr, size_t size)
 	ptr = realloc(ptr, size);
 
 	if (!ptr)
-		fatal_error("Out of memory");
+		fatal_error("realloc failed");
 
 	return ptr;
 }

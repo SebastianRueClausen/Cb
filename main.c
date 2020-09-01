@@ -1,5 +1,6 @@
-#include "lex.h"
 #include "ast.h"
+#include "sym.h"
+#include "lex.h"
 
 #include <stdio.h>
 
@@ -11,13 +12,16 @@ run_test1()
 	lex_load_file_buffer(&file_buffer, "../test/test.c");
 
 	struct lex_token token;
+	struct sym_table table;
 
-	lex_next_token(&file_buffer, &token);
+	sym_create_table(&table, 4);
+
+	token = lex_next_token(&file_buffer, &table);
 
 	printf("Running test 1 : lex token type...\n");
 	for (int i = 0; i < _TOK_COUNT; ++i)
 	{
-		lex_next_token(&file_buffer, &token);
+		token = lex_next_token(&file_buffer, &table);
 
 		if ((int)token.type == i) {
 			printf("Success : %s\n", lex_tok_to_str[i]);
@@ -28,7 +32,8 @@ run_test1()
 		}
 	}
 
-	lex_destroy_file_buffer(&file_buffer);
+	sym_cleanup_table(&table);
+	lex_cleanup_file_buffer(&file_buffer);
 }
 
 // run the lexer on a real source file
@@ -65,14 +70,18 @@ run_test2()
 	lex_load_file_buffer(&file_buffer, "../test/test2.c");
 
 	struct lex_token token;
+	struct sym_table table;
+	int i = 0;
+
+	sym_create_table(&table, 20);
 
 	for (
-			int i = 0;
+			i = 0;
 			i < (int)sizeof(expected_tokens) / (int)sizeof(enum lex_token_type);
 			++i
 		)
 	{
-		lex_next_token(&file_buffer, &token);
+		token = lex_next_token(&file_buffer, &table);
 
 		if (expected_tokens[i] != token.type) {
 			printf("Failure : %s, i = %i : should have gotten : %s\n",
@@ -85,7 +94,8 @@ run_test2()
 		}
 	}
 
-	lex_destroy_file_buffer(&file_buffer);
+	// sym_cleanup_table(&table);
+	lex_cleanup_file_buffer(&file_buffer);
 }
 
 static void
@@ -95,45 +105,52 @@ run_test3()
 	lex_load_file_buffer(&file_buffer, "../test/test3.c");
 
 	struct lex_token token;
+	struct sym_table table;
 
 	static char expected_values[] = {
 		'a', 'b', '\n', '\0', '\\', '\'', '\a', '\123', '\x12'
 	};
 
+	sym_create_table(&table, 20);
+
 	for (int i = 0; i < 9; ++i) {
-		lex_next_token(&file_buffer, &token);
-		if (expected_values[i] != token.value_char) {
-			printf("Failure : expected = %i, result = %i\n", expected_values[i], token.value_char);
+		token = lex_next_token(&file_buffer, &table);
+		if (expected_values[i] != token.value.val_int) {
+			printf("Failure : expected = %i, result = %i\n",
+					expected_values[i], (int)token.value.val_int);
 		}
 		else {
 			printf("Success : %i\n", expected_values[i]);
 		}
 	}
 
-	lex_destroy_file_buffer(&file_buffer);
+	sym_cleanup_table(&table);
+	lex_cleanup_file_buffer(&file_buffer);
 }
-
-extern struct ast_node*
-parse_expression(struct lex_file_buffer* fb, int prev_prec);
 
 static void
 run_test4()
 {
 	struct lex_file_buffer file_buffer;
-	struct lex_token token;
+	struct ast_node* node;
+	struct sym_table table;
 
 	lex_load_file_buffer(&file_buffer, "../test/test4.c");
 
-	parse_expression(&file_buffer, 0);
-	
+	node = ast_parse_expression(&file_buffer, &table, 0);
+
+	ast_print_tree(node, 0);
+
+	ast_cleanup_tree(node);
+	lex_cleanup_file_buffer(&file_buffer);
 }
 
 int main()
 {
-	// run_test1();
-	// run_test2();
+	run_test1();
+	run_test2();
 	// run_test3();
-	run_test4();
+	// run_test4();
 	
 	return 0;
 }

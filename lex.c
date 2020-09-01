@@ -1,16 +1,15 @@
-#include "lex.h"
 #include "def.h"
+#include "sym.h"
+#include "lex.h"
 
-#include <stdio.h>
-#include <stdlib.h>
 #include <assert.h>
-#include <string.h>
 #include <ctype.h>
 #include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
 
 void
-lex_load_file_buffer(struct lex_file_buffer* file_buffer,
-							const char* filename)
+lex_load_file_buffer(struct lex_file_buffer* fb, const char* filename)
 {
 	size_t filename_size;
 	size_t file_size;
@@ -24,18 +23,18 @@ lex_load_file_buffer(struct lex_file_buffer* file_buffer,
 	file_size = ftell(file);
 	rewind(file);
 
-	file_buffer->start = (char*)c_malloc(file_size);
-	file_buffer->curr = file_buffer->start;
-	file_buffer->end = file_buffer->start + file_size;
+	fb->start = (char*)c_malloc(file_size);
+	fb->curr = fb->start;
+	fb->end = fb->start + file_size;
 
 	filename_size = strlen(filename);
-	file_buffer->filename = (char*)c_malloc(filename_size);
-	strncpy(file_buffer->filename, filename, filename_size);
+	fb->filename = (char*)c_malloc(filename_size);
+	strncpy(fb->filename, filename, filename_size);
 
-	file_buffer->line = 0;
-	file_buffer->col = 0;
+	fb->line = 0;
+	fb->col = 0;
 
-	if (!fread(file_buffer->start, 1, file_size, file)) {
+	if (!fread(fb->start, 1, file_size, file)) {
 		fatal_error("Failure reading %s", filename);
 	}
 
@@ -43,147 +42,129 @@ lex_load_file_buffer(struct lex_file_buffer* file_buffer,
 }
 
 void
-lex_destroy_file_buffer(struct lex_file_buffer* file_buffer)
+lex_cleanup_file_buffer(struct lex_file_buffer* fb)
 {
-	c_free(file_buffer->start);
-	c_free(file_buffer->filename);
+	c_free(fb->start);
+	c_free(fb->filename);
 
-	file_buffer->col	= 0;
-	file_buffer->line	= 0;
-	file_buffer->start	= NULL;
-	file_buffer->curr	= NULL;
-	file_buffer->end	= NULL;
+	fb->col		= 0;
+	fb->line	= 0;
+	fb->start	= NULL;
+	fb->curr	= NULL;
+	fb->end		= NULL;
 }
 
 static struct err_location
-error_location(const struct lex_file_buffer* file_buffer)
+err_loc(const struct lex_file_buffer* fb)
 {
 	struct err_location loc = {
-		.line		= file_buffer->line,
-		.col		= file_buffer->col,
-		.filename	= file_buffer->filename
+		.line		= fb->line,
+		.col		= fb->col,
+		.filename	= fb->filename
 	};
 
 	return loc;
 }
 
 static char
-next(struct lex_file_buffer* file_buffer)
+next(struct lex_file_buffer* fb)
 {
 	char c;
 
-	if (file_buffer->curr != file_buffer->end) {
-		c = *(++file_buffer->curr);
+	if (fb->curr != fb->end) {
+		c = *(++fb->curr);
 	}
 	else {
 		return '\0';
 	}
 
 	if (c == '\n') {
-		++file_buffer->line;
-		file_buffer->col = 0;
+		++fb->line;
+		fb->col = 0;
 	}
 	else {
-		++file_buffer->col;
+		++fb->col;
 	}
 
 	return c;
 }
 
 static void
-skip(struct lex_file_buffer* file_buffer, uint32_t n)
+skip(struct lex_file_buffer* fb, int n)
 {
-	for (uint32_t i = 0; i < n; ++i) {
-		next(file_buffer);
+	int i;
+	for (i = 0; i < n; ++i) {
+		next(fb);
 	}
 }
-
-static bool
-str_cmp(const char* str1, const char* str2, uint32_t len1, uint32_t len2)
-{
-	if (len1 != len2)
-		return false;
-
-	for (uint32_t i = 0; i < len1; ++i) {
-		if (str1[i] != str2[i])
-			return false;
-	}
-
-	return true;
-}
-
 
 static char
-skip_single_line_comment(struct lex_file_buffer* file_buffer)
+skip_single_line_comment(struct lex_file_buffer* fb)
 {
-	char c = *file_buffer->curr;
+	char c = *fb->curr;
 
-	while (c != '\n' && c != '\0') {
-		c = next(file_buffer);
-	}
+	while (c != '\n' && c != '\0')
+		c = next(fb);
 
-	c = next(file_buffer);
+	c = next(fb);
 
 	return c;
 }
 
 static char
-skip_multi_line_comment(struct lex_file_buffer* file_buffer)
+skip_multi_line_comment(struct lex_file_buffer* fb)
 {
 	// skip opening /*
-	skip(file_buffer, 2);
+	skip(fb, 2);
 
-	while (file_buffer->curr != file_buffer->end) {
-		if (file_buffer->curr[0] == '*') {
-			if (file_buffer->curr[1] == '/') {
-				skip(file_buffer, 2);
-				return *file_buffer->curr;
+	while (fb->curr != fb->end) {
+		if (fb->curr[0] == '*') {
+			if (fb->curr[1] == '/') {
+				skip(fb, 2);
+				return *fb->curr;
 			}
 		}
-		next(file_buffer);
+		next(fb);
 	}
 
-	syntax_error(error_location(file_buffer),
+	syntax_error(err_loc(fb),
 			"Unexpected end of file in comment");
 	return '\0';
 }
 
 static char
-skip_whitespace_and_comments(struct lex_file_buffer* file_buffer)
+skip_whitespace_and_comments(struct lex_file_buffer* fb)
 {
 	for (;;) {
-		switch (*file_buffer->curr) {
+		switch (*fb->curr) {
 			case ' ': case '\n': case '\t':
-			case '\r': case '\v': case '\f': {
-				next(file_buffer);
-			}
-			break;
+			case '\r': case '\v': case '\f':
+				next(fb);
+				break;
 
-			case '/': {
-				if (file_buffer->curr[1] == '*') {
-					skip_multi_line_comment(file_buffer);
+			case '/':
+				if (fb->curr[1] == '*') {
+					skip_multi_line_comment(fb);
 				}
-				else if (file_buffer->curr[1] == '/') {
-					skip_single_line_comment(file_buffer);
+				else if (fb->curr[1] == '/') {
+					skip_single_line_comment(fb);
 				}
 				else {
-					return *file_buffer->curr;
+					return *fb->curr;
 				}
-			}
-			break;
+				break;
 
-			default: {
-				return *file_buffer->curr;
-			}
+			default:
+				return *fb->curr;
 		}
 	}
 }
 
-static uint32_t
-word_len(const struct lex_file_buffer* file_buffer)
+static int
+word_len(const struct lex_file_buffer* fb)
 {
-	uint32_t i = 0;
-	const char* str = file_buffer->curr;
+	int i = 0;
+	const char* str = fb->curr;
 	
 	while (str[i]) {
 		if (isalpha(str[i]) || str[i] == '_' || isdigit(str[i]))
@@ -192,15 +173,15 @@ word_len(const struct lex_file_buffer* file_buffer)
 			return i;
 	}
 
-	syntax_error(error_location(file_buffer), "Unexpected end of file");
+	syntax_error(err_loc(fb), "Unexpected end of file");
 	return 0;
 }
 
-static uint32_t
-number_len(const struct lex_file_buffer* file_buffer)
+static int
+number_len(const struct lex_file_buffer* fb)
 {
-	uint32_t i = 0;
-	const char* str = file_buffer->curr;
+	int i = 0;
+	const char* str = fb->curr;
 
 	while (str[i]) {
 		if (isdigit(str[i]) || str[i] == '.')
@@ -209,15 +190,15 @@ number_len(const struct lex_file_buffer* file_buffer)
 			return i;
 	}
 
-	syntax_error(error_location(file_buffer), "Unexpected end of file");
+	syntax_error(err_loc(fb), "Unexpected end of file");
 	return 0;
 }
 
-static uint32_t
-string_len(const struct lex_file_buffer* file_buffer)
+static int
+string_len(const struct lex_file_buffer* fb)
 {
-	uint32_t i = 0;
-	const char* str = file_buffer->curr;
+	int i = 0;
+	const char* str = fb->curr;
 
 	while (str[i]) {
 		if (str[i] != '"')
@@ -226,16 +207,16 @@ string_len(const struct lex_file_buffer* file_buffer)
 			return i;
 	}
 
-	syntax_error(error_location(file_buffer),
+	syntax_error(err_loc(fb),
 			"Unexpected end of file inside string");
 	return 0;
 }
 
-static uint32_t
-char_len(const struct lex_file_buffer* file_buffer)
+static int
+char_len(const struct lex_file_buffer* fb)
 {
-	uint32_t i = 0, slashes = 0;
-	const char* str = file_buffer->curr;
+	int i = 0, slashes = 0;
+	const char* str = fb->curr;
 
 	while (str[i]) {
 		if (str[i] == '\'') {
@@ -257,19 +238,18 @@ char_len(const struct lex_file_buffer* file_buffer)
 		}
 	}
 
-	syntax_error(error_location(file_buffer), 
+	syntax_error(err_loc(fb), 
 			"Unexpected end of file inside char literal");
 
 	return 0;
 }
 
 static enum lex_token_type
-parse_decimal_constant(const char* str, uint32_t len, int64_t* val)
+parse_decimal_constant(const char* str, int len, int64_t* val)
 {
-	uint32_t i = 0;
-	size_t tmp = 0;
-	double d_tmp = 0;
-	double k = 0.1;
+	int i = 0;
+	int64_t tmp = 0;
+	double d_tmp = 0, k = 0.1;
 
 	while (i != len && str[i] != '.') {
 		tmp = tmp * 10 + str[i] - '0';
@@ -295,12 +275,11 @@ parse_decimal_constant(const char* str, uint32_t len, int64_t* val)
 }
 
 static enum lex_token_type
-parse_octal_constant(const char* str, uint32_t len, int64_t* val)
+parse_octal_constant(const char* str, int len, int64_t* val)
 {
-	uint32_t i = 0;
-	size_t tmp = 0;
-	double d_tmp = 0;
-	double k = 0.125;
+	int i = 0;
+	int64_t tmp = 0;
+	double d_tmp = 0, k = 0.125;
 
 	while (i != len && str[i] != '.') {
 		tmp = tmp * 8 + str[i] - '0';
@@ -326,13 +305,12 @@ parse_octal_constant(const char* str, uint32_t len, int64_t* val)
 }
 
 static enum lex_token_type
-parse_hex_constant(const char* str, uint32_t len, int64_t* val)
+parse_hex_constant(const char* str, int len, int64_t* val)
 {
-	uint32_t i = 0;
+	int i = 0;
 	size_t tmp = 0;
 
 	while (i != len) {
-
 		if (str[i] >= 'a' && str[i] <= 'f')
 			tmp = tmp * 16 + str[i] - 0x57;
 		else if (str[i] >= 'A' && str[i] <= 'F')
@@ -351,36 +329,29 @@ parse_hex_constant(const char* str, uint32_t len, int64_t* val)
 }
 
 static void
-parse_string_literal(const char* str, uint32_t len, char* buffer)
+parse_string_literal(const char* str, int len, char* buffer)
 {
 	
 }
 
 static int
-parse_multichar_constant(const struct lex_file_buffer* file_buffer, int len)
+parse_multichar_constant(const struct lex_file_buffer* fb, int len)
 {
-	int i, val = 0;
-	const char* str = file_buffer->curr;
-
-	for (i = 0; i < len; ++i) {
-		val = str[i];	
-	}
-
-	syntax_warning(error_location(file_buffer),
+	syntax_warning(err_loc(fb),
 		"multi-character constant");
 
 	if (len >= 6)
-		syntax_warning(error_location(file_buffer),
+		syntax_warning(err_loc(fb),
 			"multi-character constant is too long");
 
-	return i;
+	return fb->curr[len - 1];
 }
 
 static int
-parse_char_literal(const struct lex_file_buffer* file_buffer, int len)
+parse_char_literal(const struct lex_file_buffer* fb, int len)
 {
 	int64_t c = 0;
-	const char* str = file_buffer->curr;
+	const char* str = fb->curr;
 
 	switch (len) {
 		case 1:
@@ -407,13 +378,11 @@ parse_char_literal(const struct lex_file_buffer* file_buffer, int len)
 						parse_hex_constant(str + 2, len - 2, &c);
 						return c;
 					default:
-						syntax_error(error_location(file_buffer),
-								"Invalid escape sequence");
+						syntax_error(err_loc(fb), "Invalid escape sequence");
 				}
 			}
-			else {
-				return parse_multichar_constant(file_buffer, len);		
-			}
+			else
+				return parse_multichar_constant(fb, len);		
 			break;
 
 		case 3: case 4:
@@ -428,139 +397,126 @@ parse_char_literal(const struct lex_file_buffer* file_buffer, int len)
 						parse_hex_constant(str + 2, len - 2, &c);
 						return c;
 					case 'u':
-						syntax_error(error_location(file_buffer),
-								"Unicode is yet to be implemented");
+						syntax_error(err_loc(fb), "Unicode is yet to be implemented");
 						return 0;
 					default:
-						syntax_error(error_location(file_buffer),
-								"Invalid escape sequence");
+						syntax_error(err_loc(fb), "Invalid escape sequence");
 						return 0;
 				}
 			}
-			else {
-				return parse_multichar_constant(file_buffer, len);
-			}
+			else
+				return parse_multichar_constant(fb, len);
+			break;
 
 		case 8:
 			if (str[0] == '\\') {
 				if (str[1] == 'U') {
-					syntax_error(error_location(file_buffer),
+					syntax_error(err_loc(fb),
 							"Unicode is yet to be implemented");
 				}
 			}
 			else {
-				return parse_multichar_constant(file_buffer, len);
+				return parse_multichar_constant(fb, len);
 			}
+			break;
 
 		default:
-			return parse_multichar_constant(file_buffer, len);
+			return parse_multichar_constant(fb, len);
 	}
 	
-	printf("We shouldent be here");
 	assert(false);
 }
 
 static enum lex_token_type
-lookup_keyword(const char* str, uint32_t len)
+lookup_keyword(int64_t hash, int len)
 {
-	switch (*str) {
-		case 'i':
-			if (str_cmp(str, "if", len, 2))
+	switch (len) {
+		case 2:
+			if (hash == 210805918999320793)
 				return TOK_KEY_IF;
-			if (str_cmp(str, "int", len, 3))
-				return TOK_KEY_INT;
-			break;
-		case 'e':
-			if (str_cmp(str, "else", len, 4))
-				return TOK_KEY_ELSE;
-			if (str_cmp(str, "enum", len, 4))
-				return TOK_KEY_ENUM;
-			if (str_cmp(str, "extern", len, 6))
-				return TOK_KEY_EXTERN;
-			break;
-		case 'w':
-			if (str_cmp(str, "while", len, 5))
-				return TOK_KEY_WHILE;
-			break;
-		case 'f':
-			if (str_cmp(str, "for", len, 3))
-				return TOK_KEY_FOR;
-			if (str_cmp(str, "float", len, 5))
-				return TOK_KEY_FLOAT;
-			break;
-		case 's':
-			if (str_cmp(str, "switch", len, 6))
-				return TOK_KEY_SWITCH;
-			if (str_cmp(str, "struct", len, 6))
-				return TOK_KEY_STRUCT;
-			if (str_cmp(str, "static", len, 6))
-				return TOK_KEY_STATIC;
-			if (str_cmp(str, "sizeof", len, 6))
-				return TOK_KEY_SIZEOF;
-			if (str_cmp(str, "short", len, 5))
-				return TOK_KEY_SHORT;
-			if (str_cmp(str, "signed", len, 6))
-				return TOK_KEY_SIGNED;;
-			break;
-		case 'c':
-			if (str_cmp(str, "char", len, 4))
-				return TOK_KEY_CHAR;
-			if (str_cmp(str, "const", len, 5))
-				return TOK_KEY_CONST;
-			if (str_cmp(str, "case", len, 4))
-				return TOK_KEY_CASE;
-			if (str_cmp(str, "continue", len, 8))
-				return TOK_KEY_CONTINUE;
-			break;
-		case 'b':
-			if (str_cmp(str, "break", len, 5))
-				return TOK_KEY_BREAK;
-			break;
-		case 'r':
-			if (str_cmp(str, "return", len, 6))
-				return TOK_KEY_RETURN;
-			if (str_cmp(str, "register", len, 8))
-				return TOK_KEY_REGISTER;
-			break;
-		case 'd':
-			if (str_cmp(str, "do", len, 2))
+			if (hash == 3416275755843533644)
 				return TOK_KEY_DO;
-			if (str_cmp(str, "double", len, 6))
-				return TOK_KEY_DOUBLE;
-			if (str_cmp(str, "default", len, 7))
-				return TOK_KEY_DEFAULT;
 			break;
-		case 'l':
-			if (str_cmp(str, "long", len, 4))
+
+		case 3:
+			if (hash == 7858283700166231528)
+				return TOK_KEY_INT;
+			if (hash == 691152041897930411)
+				return TOK_KEY_FOR;
+			break;
+
+		case 4:
+			if (hash == 611863941455303809)
+				return TOK_KEY_ELSE;
+			if (hash == 1427961834693360368)
+				return TOK_KEY_ENUM;
+			if (hash == 4089114412274189689)
+				return TOK_KEY_CHAR;
+			if (hash == 1765111298423762854)
+				return TOK_KEY_CASE;
+			if (hash == 4396619338160439502)
 				return TOK_KEY_LONG;
-			break;
-		case 'u':
-			if (str_cmp(str, "union", len, 5))
-				return TOK_KEY_UNION;
-			if (str_cmp(str, "unsigned", len, 8))
-				return TOK_KEY_UNSIGNED;
-			break;
-		case 't':
-			if (str_cmp(str, "typedef", len, 7))
-				return TOK_KEY_TYPEDEF;
-			break;
-		case 'v':
-			if (str_cmp(str, "void", len, 4))
+			if (hash == 7255839161879393319)
 				return TOK_KEY_VOID;
-			if (str_cmp(str, "volatile", len, 8))
-				return TOK_KEY_VOLATILE;
-			break;
-		case 'g':
-			if (str_cmp(str, "goto", len, 4))
+			if (hash == 8715651464562445227)
 				return TOK_KEY_GOTO;
 			break;
-		default:
-			return TOK_IDENTIFIER;
+
+		case 5:
+			if (hash == 3875119015612757251)
+				return TOK_KEY_WHILE;
+			if (hash == 2807200987411122317)
+				return TOK_KEY_FLOAT;
+			if (hash == 1402861911904202446)
+				return TOK_KEY_SHORT;
+			if (hash == 5471028013491099405)
+				return TOK_KEY_CONST;
+			if (hash == 9152775002878652110)
+				return TOK_KEY_BREAK;
+			if (hash == 270728114491518239)
+				return TOK_KEY_UNION;
+			break;
+
+		case 6:
+			if (hash == 7727572673835008135)
+				return TOK_KEY_EXTERN;
+			if (hash == 2646967638904444428)
+				return TOK_KEY_SWITCH;
+			if (hash == 5693220595859545018)
+				return TOK_KEY_STRUCT;
+			if (hash == 7489007233736309326)
+				return TOK_KEY_STATIC;
+			if (hash == 884287416668004567)
+				return TOK_KEY_SIZEOF;
+			if (hash == 3510987647836465774)
+				return TOK_KEY_SIGNED;
+			if (hash == 3362893395776512250)
+				return TOK_KEY_RETURN;
+			if (hash == 7342538386031234340)
+				return TOK_KEY_DOUBLE;
+			break;
+
+		case 7:
+			if (hash == 2936402720817092402)
+				return TOK_KEY_DEFAULT;
+			if (hash == 3794314392136692499)
+				return TOK_KEY_TYPEDEF;
+			break;
+
+		case 8:
+			if (hash == 3631951867840661473)
+				return TOK_KEY_CONTINUE;
+			if (hash == 7202289517847671133)
+				return TOK_KEY_REGISTER;
+			if (hash == 2298029417117381043)
+				return TOK_KEY_UNSIGNED;
+			if (hash == 8161154796913793944)
+				return TOK_KEY_VOLATILE;
+			break;
 	}
-	
+
 	return TOK_IDENTIFIER;
 }
-
 
 static enum lex_token_type
 lookup_symbol(const char* str, int* symbol_len)
@@ -736,50 +692,55 @@ lookup_symbol(const char* str, int* symbol_len)
 	return TOK_UNKNOWN;
 }
 
-void
-lex_next_token(struct lex_file_buffer* file_buffer, struct lex_token* token)
+struct lex_token
+lex_next_token(struct lex_file_buffer* fb, struct sym_table* table)
 {
 	char c;
 	int token_len;
+	int64_t hash;
+	struct sym_entry id_entry;
 
-	c = skip_whitespace_and_comments(file_buffer);
+	c = skip_whitespace_and_comments(fb);
 
 	if (isalpha(c) || c == '_') {
-		token_len = word_len(file_buffer);
-		token->type = lookup_keyword(file_buffer->curr, token_len);
-		skip(file_buffer, token_len);
-		
-		token->err_loc = error_location(file_buffer);
+		token_len = word_len(fb);
+		hash = sym_hash(fb->curr, token_len);
+		fb->last.type = lookup_keyword(hash, token_len);
+		skip(fb, token_len);
+
+		if (fb->last.type == TOK_IDENTIFIER) {
+			id_entry.hash = hash;
+			fb->last.value.id = sym_find_entry(table, hash);	
+
+			if (fb->last.value.id != -1)
+				fb->last.value.id = sym_add_entry(table, id_entry);
+		}
 	}
 	// We should check if there is a digit after after a '.'
 	else if (isdigit(c)) { 
-		token_len = number_len(file_buffer);	
-		token->type = parse_decimal_constant(file_buffer->curr, 
-				token_len, &token->value_int);
-		skip(file_buffer, token_len);
-
-		token->err_loc = error_location(file_buffer);
+		token_len = number_len(fb);	
+		fb->last.type = parse_decimal_constant(fb->curr, 
+				token_len, &fb->last.value.val_int);
+		skip(fb, token_len);
 	}
 	else if (c == '"') {
-		token->type = TOK_CONSTANT_STRING;
-		next(file_buffer);
-		token_len = string_len(file_buffer);
-		skip(file_buffer, token_len + 1);
-
-		token->err_loc = error_location(file_buffer);
+		fb->last.type = TOK_CONSTANT_STRING;
+		next(fb);
+		token_len = string_len(fb);
+		skip(fb, token_len + 1);
 	}
 	else if (c == '\'') {
-		token->type = TOK_CONSTANT_CHAR;
-		next(file_buffer);
-		token_len = char_len(file_buffer);
-		token->value_int = parse_char_literal(file_buffer, token_len);
-		skip(file_buffer, token_len + 1);
-
-		token->err_loc = error_location(file_buffer);
+		fb->last.type = TOK_CONSTANT_CHAR;
+		next(fb);
+		token_len = char_len(fb);
+		fb->last.value.val_int = parse_char_literal(fb, token_len);
+		skip(fb, token_len + 1);
 	}
 	else {
-		token->type = lookup_symbol(file_buffer->curr, &token_len);
-		skip(file_buffer, token_len);
-		token->err_loc = error_location(file_buffer);
+		fb->last.type = lookup_symbol(fb->curr, &token_len);
+		skip(fb, token_len);
 	}
+
+	fb->last.err_loc = err_loc(fb);
+	return fb->last;
 }

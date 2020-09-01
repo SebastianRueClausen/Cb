@@ -3,21 +3,6 @@
 
 #include "def.h"
 
-#include <stdint.h>
-#include <stddef.h>
-
-struct lex_file_buffer
-{
-	uint32_t line;
-	uint32_t col;
-
-	char* filename;
-	
-	char* start;
-	char* curr;
-	char* end;
-};
-
 enum lex_token_type
 {
 	// special
@@ -133,9 +118,9 @@ static const char* lex_tok_to_str[_TOK_COUNT + 1] =
 	"TOK_CONSTANT_FLOAT",		
 	"TOK_CONSTANT_STRING",		
 	"TOK_CONSTANT_CHAR",		
-	"TOK_OP_PLUS",				
-	"TOK_OP_MINUS",				
-	"TOK_OP_STAR",				
+	"TOK_OP_PLUS",
+	"TOK_OP_MINUS", 
+	"TOK_OP_STAR",
 	"TOK_OP_DIV",				
 	"TOK_OP_MOD",				
 	"TOK_OP_PLUS_ASSIGN",		
@@ -217,21 +202,33 @@ static const char* lex_tok_to_str[_TOK_COUNT + 1] =
 
 struct lex_token
 {
-	enum lex_token_type type;
-
-	struct err_location err_loc;
-
-	union
-	{
-		int64_t value_int;
-		double value_float;
-		char value_char;
-	};
+	enum				lex_token_type type;
+	struct				err_location err_loc;
+	union const_value	value;
+	int					identifier_id;
 };
 
-void lex_load_file_buffer(struct lex_file_buffer* file_buffer,
-							const char* filename);
-void lex_destroy_file_buffer(struct lex_file_buffer* file_buffer);
-void lex_next_token(struct lex_file_buffer* file_buffer, struct lex_token* token);
+struct lex_file_buffer
+{
+	uint32_t			line;
+	uint32_t			col;
+
+	char*				filename;
+	
+	char*				start;
+	char*				curr;
+	char*				end;
+
+	struct lex_token	last;
+};
+
+void
+lex_load_file_buffer(struct lex_file_buffer* file_buffer, const char* filename);
+
+void
+lex_cleanup_file_buffer(struct lex_file_buffer* file_buffer);
+
+struct lex_token
+lex_next_token(struct lex_file_buffer* fb, struct sym_table* table);
 
 #endif
