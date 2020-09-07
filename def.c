@@ -5,16 +5,14 @@
 #include <stdlib.h>
 
 void
-fatal_error(const char* fmt, ...)
+fatal_error(const char *fmt, ...)
 {
 	va_list args;
 	va_start(args, fmt);
 
-	printf(
-		"\x1B[31m"
-		"[Error]: "
-		"\x1B[0m"
-	);
+	printf("\x1B[31m"
+		   "[Error]: "
+		   "\x1B[0m");
 
 	vprintf(fmt, args);
 
@@ -24,19 +22,16 @@ fatal_error(const char* fmt, ...)
 }
 
 void
-syntax_error(struct err_location loc, const char* fmt, ...)
+syntax_error(struct err_location loc, const char *fmt, ...)
 {
 	va_list args;
 	va_start(args, fmt);
 
-	printf(
-		"%s: %u, %u: "
-		"\x1B[31m"
-		"[Syntax Error]: "
-		"\x1B[0m",
-		loc.filename,
-		loc.line, loc.col
-	);
+	printf("%s: %u, %u: "
+		   "\x1B[31m"
+		   "[Syntax Error]: "
+		   "\x1B[0m",
+		   loc.filename, loc.line, loc.col);
 
 	vprintf(fmt, args);
 
@@ -47,29 +42,26 @@ syntax_error(struct err_location loc, const char* fmt, ...)
 }
 
 void
-syntax_warning(struct err_location loc, const char* fmt, ...)
+syntax_warning(struct err_location loc, const char *fmt, ...)
 {
 	va_list args;
 	va_start(args, fmt);
 
-	printf(
-		"%s: %u, %u: "
-		"\x1B[33m"
-		"[Warning]: "
-		"\x1B[0m",
-		loc.filename,
-		loc.line, loc.col
-	);
+	printf("%s: %u, %u: "
+		   "\x1B[33m"
+		   "[Warning]: "
+		   "\x1B[0m",
+		   loc.filename, loc.line, loc.col);
 
 	vprintf(fmt, args);
 
 	printf("\n");
 }
 
-void*
+void *
 c_malloc(size_t size)
 {
-	void* ptr = malloc(size);
+	void *ptr = malloc(size);
 
 	if (!ptr)
 		fatal_error("out of memory");
@@ -77,8 +69,8 @@ c_malloc(size_t size)
 	return ptr;
 }
 
-void*
-c_realloc(void* ptr, size_t size)
+void *
+c_realloc(void *ptr, size_t size)
 {
 	ptr = realloc(ptr, size);
 
@@ -89,7 +81,7 @@ c_realloc(void* ptr, size_t size)
 }
 
 void
-c_free(void* ptr)
+c_free(void *ptr)
 {
 	free(ptr);
 }

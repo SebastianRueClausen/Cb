@@ -1,0 +1,27 @@
+[
+{
+  "directory": "/home/sebastian/devel/Cb/build",
+  "command": "/usr/bin/cc   -Wall -Wextra -o CMakeFiles/Cb.dir/main.c.o -c /home/sebastian/devel/Cb/main.c",
+  "file": "/home/sebastian/devel/Cb/main.c"
+},
+{
+  "directory": "/home/sebastian/devel/Cb/build",
+  "command": "/usr/bin/cc   -Wall -Wextra -o CMakeFiles/Cb.dir/sym.c.o -c /home/sebastian/devel/Cb/sym.c",
+  "file": "/home/sebastian/devel/Cb/sym.c"
+},
+{
+  "directory": "/home/sebastian/devel/Cb/build",
+  "command": "/usr/bin/cc   -Wall -Wextra -o CMakeFiles/Cb.dir/ast.c.o -c /home/sebastian/devel/Cb/ast.c",
+  "file": "/home/sebastian/devel/Cb/ast.c"
+},
+{
+  "directory": "/home/sebastian/devel/Cb/build",
+  "command": "/usr/bin/cc   -Wall -Wextra -o CMakeFiles/Cb.dir/def.c.o -c /home/sebastian/devel/Cb/def.c",
+  "file": "/home/sebastian/devel/Cb/def.c"
+},
+{
+  "directory": "/home/sebastian/devel/Cb/build",
+  "command": "/usr/bin/cc   -Wall -Wextra -o CMakeFiles/Cb.dir/lex.c.o -c /home/sebastian/devel/Cb/lex.c",
+  "file": "/home/sebastian/devel/Cb/lex.c"
+}
+]

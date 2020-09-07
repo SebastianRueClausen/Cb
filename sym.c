@@ -4,9 +4,10 @@
 #include <stdio.h>
 
 // murmur hash
-int64_t sym_hash(const char* key, int len)
+int64_t
+sym_hash(const char *key, int len)
 {
-	int i;
+	int		i;
 	int64_t h = 525201411107845655;
 	for (i = 0; i < len; ++i) {
 		h ^= key[i];
@@ -17,8 +18,13 @@ int64_t sym_hash(const char* key, int len)
 	return h;
 }
 
+struct sym_entry
+{
+	int64_t hash;
+};
+
 void
-sym_create_table(struct sym_table* table, size_t count)
+sym_create_table(struct sym_table *table, int count)
 {
 	table->entry_allocated	= count;
 	table->entries			= c_malloc(sizeof(struct sym_entry) * count);
@@ -26,30 +32,32 @@ sym_create_table(struct sym_table* table, size_t count)
 }
 
 int
-sym_add_entry(struct sym_table* table, struct sym_entry entry)
+sym_add_entry(struct sym_table *table, int64_t hash)
 {
+	struct sym_entry entry;
+
 	if (table->entry_allocated == table->entry_count) {
 		// We double the size for now
 		table->entry_allocated *= 2;
-		table->entries = c_realloc(
-			table->entries, sizeof(struct sym_entry) * table->entry_allocated
-		);
+		table->entries = c_realloc(table->entries, sizeof(struct sym_entry) *
+													   table->entry_allocated);
 	}
 
+	entry.hash = hash;
 	table->entries[table->entry_count] = entry;
-	return table->entry_count++;	
+	return table->entry_count++;
 }
 
 void
-sym_cleanup_table(struct sym_table* table)
+sym_cleanup_table(struct sym_table *table)
 {
-	table->entry_allocated	= 0;	
+	table->entry_allocated	= 0;
 	table->entry_count		= 0;
 	c_free(table->entries);
 }
 
 int
-sym_find_entry(const struct sym_table* table, int64_t hash)
+sym_find_entry(const struct sym_table *table, int64_t hash)
 {
 	int i;
 
@@ -61,7 +69,3 @@ sym_find_entry(const struct sym_table* table, int64_t hash)
 
 	return -1;
 }
-
-
-
-

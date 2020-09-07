@@ -7,20 +7,45 @@
 
 enum ast_type
 {
-	AST_UNDEF, AST_ADD, AST_MIN, AST_MUL, AST_DIV, AST_INT, _AST_COUNT
-};
+	AST_UNDEF,
 
-static const char*
-ast_type_to_str[] = {	
-	"AST_UNDEF", "AST_ADD", "AST_MIN", "AST_MUL", "AST_DIV", "AST_INT"
+	AST_ADD,
+	AST_MIN,
+	AST_MUL,
+	AST_DIV,
+
+	AST_EQUAL,
+	AST_NOT_EQUAL,
+	AST_LESSER,
+	AST_GREATER,
+	AST_LESSER_EQUAL,
+	AST_GREATER_EQUAL,
+
+	AST_ASSIGN,
+
+	AST_INT,
+
+	AST_IF,
+
+	AST_IDENTIFIER,
+
+	AST_NOP,
+
+	_AST_COUNT
 };
 
 struct ast_node
 {
-	enum				ast_type type;
-	union const_value	value;
-	struct				ast_node* left;
-	struct				ast_node* right;
+	enum						ast_type type;
+	struct ast_node				*left;
+	struct ast_node				*center;			// mainly used for condit statements
+	struct ast_node				*right;
+	
+	union
+	{
+		union const_value		value;
+		int						id;
+	};
 };
 
 struct ast_node*
