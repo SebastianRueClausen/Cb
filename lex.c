@@ -129,22 +129,25 @@ lex_load_file_buffer(struct lex_file_buffer *fb, const char *filename)
 	file_size = ftell(file);
 	rewind(file);
 
-	fb->start = (char *)c_malloc(file_size);
-	fb->curr  = fb->start;
-	fb->end	  = fb->start + file_size;
+	fb->start = c_malloc(file_size);
+	fb->curr = fb->start;
+	fb->end	= fb->start + file_size;
 
 	filename_size = strlen(filename);
-	fb->filename  = (char *)c_malloc(filename_size);
+	fb->filename  = c_malloc(filename_size);
 	strncpy(fb->filename, filename, filename_size);
 
-	fb->line = 0;
-	fb->col	 = 0;
+	fb->line = 1;
+	fb->col	 = 1;
 
 	if (!fread(fb->start, 1, file_size, file)) {
 		fatal_error("Failure reading %s", filename);
 	}
 
 	fclose(file);
+
+	// lex the first node, so next lex_next_token gets the first node
+	lex_next_token(fb);	
 }
 
 void
@@ -173,7 +176,7 @@ next(struct lex_file_buffer *fb)
 
 	if (c == '\n') {
 		++fb->line;
-		fb->col = 0;
+		fb->col = 1;
 	} else {
 		++fb->col;
 	}
@@ -771,33 +774,38 @@ lex_next_token(struct lex_file_buffer *fb)
 	c = skip_whitespace_and_comments(fb);
 
 	fb->last_token = fb->curr_token;
+	fb->curr_token = fb->next_token;
 
 	if (isalpha(c) || c == '_') {
-		token_len			= word_len(fb);
-		fb->curr_token.hash = sym_hash(fb->curr, token_len);
-		fb->curr_token.type = lookup_keyword(fb->curr_token.hash, token_len);
+		token_len = word_len(fb);
+		fb->next_token.hash = sym_hash(fb->curr, token_len);
+		fb->next_token.type = lookup_keyword(fb->next_token.hash, token_len);
 		skip(fb, token_len);
-	} else if (isdigit(c) || (c == '.' && isdigit(fb->curr[1]))) {
-		token_len			= number_len(fb);
-		fb->curr_token.type = parse_decimal_constant(
+	}
+	else if (isdigit(c) || (c == '.' && isdigit(fb->curr[1]))) {
+		token_len = number_len(fb);
+		fb->next_token.type = parse_decimal_constant(
 			fb->curr, token_len, &fb->curr_token.value.val_int);
 		skip(fb, token_len);
-	} else if (c == '"') {
-		fb->curr_token.type = TOK_STRING_LIT;
+	}
+	else if (c == '"') {
+		fb->next_token.type = TOK_STRING_LIT;
 		next(fb);
 		token_len = string_len(fb);
 		skip(fb, token_len + 1);
-	} else if (c == '\'') {
-		fb->curr_token.type = TOK_CHAR_LIT;
+	}
+	else if (c == '\'') {
+		fb->next_token.type = TOK_CHAR_LIT;
 		next(fb);
-		token_len					 = char_len(fb);
-		fb->curr_token.value.val_int = parse_char_literal(fb, token_len);
+		token_len = char_len(fb);
+		fb->next_token.value.val_int = parse_char_literal(fb, token_len);
 		skip(fb, token_len + 1);
-	} else {
-		fb->curr_token.type = lookup_symbol(fb->curr, &token_len);
+	}
+	else {
+		fb->next_token.type = lookup_symbol(fb->curr, &token_len);
 		skip(fb, token_len);
 	}
 
-	fb->curr_token.err_loc = err_loc(fb);
+	fb->next_token.err_loc = err_loc(fb);
 	return fb->curr_token;
 }

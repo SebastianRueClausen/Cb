@@ -26,6 +26,7 @@ enum ast_type
 	AST_INT,
 
 	AST_IF,
+	AST_WHILE,
 
 	AST_IDENTIFIER,
 
@@ -48,13 +49,13 @@ struct ast_node
 	};
 };
 
-struct ast_node*
-ast_parse_expression(struct lex_file_buffer* fb, struct sym_table* table, int prev_prec);
-
 void
 ast_print_tree(struct ast_node* node, int level);
 
 void
 ast_cleanup_tree(struct ast_node* node);
+
+void
+ast_test();
 
 #endif

@@ -115,54 +115,13 @@ run_test3()
 	lex_cleanup_file_buffer(&file_buffer);
 }
 
-static void
-run_test4()
-{
-	struct lex_file_buffer file_buffer;
-	struct ast_node *ass;
-	struct sym_table table;
-
-	lex_load_file_buffer(&file_buffer, "../test/test4.c");
-	sym_create_table(&table, 10);
-
-	/*
-	lex_next_token(&file_buffer);
-	ast_parse_declaration(&file_buffer, &table);
-	assert(lex_next_token(&file_buffer).type == TOK_SEMIKOLON);
-	lex_next_token(&file_buffer);
-
-	ast_parse_declaration(&file_buffer, &table);
-	while (lex_next_token(&file_buffer).type != TOK_ASSIGN);
-	ass = ast_parse_assignment(&file_buffer, &table);
-	*/
-
-	ass = ast_parse_expression(&file_buffer, &table, 0);	
-	ast_print_tree(ass, 0);
-
-	ast_cleanup_tree(ass);
-	lex_cleanup_file_buffer(&file_buffer);
-	sym_cleanup_table(&table);
-}
-
 int main()
 {
-	// run_test1();
+	run_test1();
 	// run_test2();
 	// run_test3();
 	// run_test4();
-	int i;
-	int *ptr;
-	
-	struct vector v = vector_create(sizeof(int), 10);
-
-	for (i = 0; i < 21; ++i) {
-		ptr = vector_add(&v);
-		*ptr = i;
-	}
-
-	for (i = 0; i < 21; ++i) {
-		printf("%i\n", *(int*)(v.data + sizeof(int) * i));
-	}
+	ast_test();
 	
 	return 0;
 }

@@ -113,8 +113,8 @@ enum lex_token_type
 
 struct lex_token
 {
-	enum					lex_token_type type;
-	struct					err_location err_loc;
+	enum lex_token_type		type;
+	struct err_location		err_loc;
 	
 	union
 	{
@@ -136,6 +136,7 @@ struct lex_file_buffer
 
 	struct lex_token		last_token;
 	struct lex_token		curr_token;
+	struct lex_token		next_token;
 };
 
 struct err_location
