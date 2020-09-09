@@ -147,30 +147,6 @@ make_ast_node(enum ast_type type, struct ast_node *left,
 	return node;
 }
 
-static void
-parse_declaration(struct lex_file_buffer *fb, struct sym_table *table)
-{
-	int id;
-	struct lex_token token;
-
-	// it should loop through declaration specifiers,
-	// and create a bitfield
-	if (!type_spec_tok_to_ast(fb->curr_token.type)) {
-		printf("%s\n", lex_tok_str(fb->curr_token.type));
-		assert(false);
-	}
-
-	token = lex_next_token(fb);
-
-	assert(token.type == TOK_IDENTIFIER);
-
-	id = sym_find_entry(table, token.hash);
-	if (id == -1)
-		id = sym_add_entry(table, token.hash);
-	else
-		syntax_error(token.err_loc, "redefinition of variabel");
-}
-
 static struct ast_node*
 parse_expression(struct lex_file_buffer *fb, struct sym_table *table,
 				 int prev_prec)
@@ -249,6 +225,44 @@ parse_assignment(struct lex_file_buffer *fb, struct sym_table *table,
 	left = make_ast_node(type, left, NULL, right);
 
 	return left;	
+}
+
+static struct ast_node*
+parse_declaration(struct lex_file_buffer *fb, struct sym_table *table)
+{
+	int id;
+	struct lex_token token;
+	struct ast_node *right, *left;
+
+	// it should loop through declaration specifiers,
+	// and create a bitfield
+	if (!type_spec_tok_to_ast(fb->curr_token.type)) {
+		printf("%s\n", lex_tok_str(fb->curr_token.type));
+		assert(false);
+	}
+
+	token = lex_next_token(fb);
+
+	assert(token.type == TOK_IDENTIFIER);
+
+	id = sym_find_entry(table, token.hash);
+	if (id == -1)
+		id = sym_add_entry(table, token.hash);
+	else
+		syntax_error(token.err_loc, "redefinition of variabel");
+
+	// inline assignment
+	// should also check for assignment list
+	if (fb->next_token.type == TOK_ASSIGN) {
+		token = lex_next_token(fb);	
+		right = make_ast_node(AST_IDENTIFIER, NULL, NULL, NULL);
+		left = parse_expression(fb, table, 0);
+		left = make_ast_node(AST_ASSIGN, left, NULL, right);
+
+		return left;
+	}
+
+	return NULL;
 }
 
 static struct ast_node*
