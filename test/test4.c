@@ -1,5 +1,5 @@
 {
-	int i = 12;
+	float i = 1;
 
 	while (123 * 2 >= 3)
 	{

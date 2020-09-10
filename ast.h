@@ -23,7 +23,9 @@ enum ast_type
 
 	AST_ASSIGN,
 
-	AST_INT,
+	AST_INT_LIT,
+	AST_CHAR_LIT,
+	AST_FLOAT_LIT,
 
 	AST_IF,
 	AST_WHILE,

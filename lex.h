@@ -12,7 +12,6 @@ enum lex_token_type
 	TOK_INT_LIT,				// 1234
 	TOK_FLOAT_LIT,				// 1.234
 	TOK_STRING_LIT,				// "1234"
-	TOK_CHAR_LIT,				// '1'
 	
 	// operators
 	TOK_PLUS,					// +

@@ -25,7 +25,6 @@ static const char *tok_str[_TOK_COUNT + 1] = {
 	"TOK_CONSTANT_INT",
 	"TOK_CONSTANT_FLOAT",
 	"TOK_CONSTANT_STRING",
-	"TOK_CONSTANT_CHAR",
 	"TOK_PLUS",
 	"TOK_MINUS",
 	"TOK_STAR",
@@ -108,7 +107,7 @@ static const char *tok_str[_TOK_COUNT + 1] = {
 	"TOK_EOF"
 };
 
-const char *
+const char*
 lex_tok_str(enum lex_token_type type)
 {
 	return tok_str[type];
@@ -520,6 +519,7 @@ parse_char_literal(const struct lex_file_buffer *fb, int len)
 	}
 
 	assert(false);
+	return 0;
 }
 
 static enum lex_token_type
@@ -795,7 +795,7 @@ lex_next_token(struct lex_file_buffer *fb)
 		skip(fb, token_len + 1);
 	}
 	else if (c == '\'') {
-		fb->next_token.type = TOK_CHAR_LIT;
+		fb->next_token.type = TOK_INT_LIT;
 		next(fb);
 		token_len = char_len(fb);
 		fb->next_token.value.val_int = parse_char_literal(fb, token_len);

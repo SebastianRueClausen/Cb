@@ -18,11 +18,6 @@ sym_hash(const char *key, int len)
 	return h;
 }
 
-struct sym_entry
-{
-	int64_t hash;
-};
-
 void
 sym_create_table(struct sym_table *table, int count)
 {
@@ -32,10 +27,8 @@ sym_create_table(struct sym_table *table, int count)
 }
 
 int
-sym_add_entry(struct sym_table *table, int64_t hash)
+sym_add_entry(struct sym_table *table, struct sym_entry entry)
 {
-	struct sym_entry entry;
-
 	if (table->entry_allocated == table->entry_count) {
 		// We double the size for now
 		table->entry_allocated *= 2;
@@ -43,7 +36,6 @@ sym_add_entry(struct sym_table *table, int64_t hash)
 													   table->entry_allocated);
 	}
 
-	entry.hash = hash;
 	table->entries[table->entry_count] = entry;
 	return table->entry_count++;
 }
@@ -68,4 +60,41 @@ sym_find_entry(const struct sym_table *table, int64_t hash)
 	}
 
 	return -1;
+}
+
+static const char* sym_type_str[] =
+{
+	"SYM_NONE",
+	"SYM_INT",
+	"SYM_FLOAT",
+	"SYM_CHAR",
+	"SYM_DOUBLE"
+};
+
+static const char* sym_spec_str[] =
+{
+	"SYM_CONST",
+	"SYM_EXTERN",
+	"SYM_LONG",
+	"SYM_REGISTER",
+	"SYM_SIGNED",
+	"SYM_STATIC",
+	"SYM_UNSIGNED",
+	"SYM_VOLATILE",
+	"SYM_SHORT"
+};
+
+void
+sym_print(const struct sym_entry *entry)
+{
+	int i;
+
+	printf("entry: \n");
+	printf("\thash: %li\n", entry->hash);
+	printf("\ttype: %s\n", sym_type_str[entry->type]);
+
+	for (i = 0; i < 9; ++i) {
+		printf("\t%s: %s\n", sym_spec_str[i], (entry->specifiers & (1<< i) ? "X" : "0"));
+	}
+
 }
