@@ -117,7 +117,7 @@ run_test3()
 
 int main()
 {
-	run_test1();
+	// run_test1();
 	// run_test2();
 	// run_test3();
 	// run_test4();

@@ -88,9 +88,7 @@ type_spec_tok_to_ast(enum lex_token_type tok)
 		case TOK_KEY_DOUBLE:
 			return true;
 		default:
-			return false;
-	}
-}
+			return false; } }
 
 static enum ast_type
 op_tok_to_ast(enum lex_token_type tok)
@@ -341,6 +339,7 @@ parse_for_loop(struct lex_file_buffer *fb, struct sym_table *table)
 static struct ast_node*
 parse_statement(struct lex_file_buffer *fb, struct sym_table *table)
 {
+	enum ast_type type;
 	struct lex_token token = lex_next_token(fb);	
 
 	switch (token.type) {
@@ -361,107 +360,58 @@ parse_statement(struct lex_file_buffer *fb, struct sym_table *table)
 			syntax_error(token.err_loc, "unexpected closed brace");
 			break;
 
-		// We just skip an identifier for now,
-		// since if it is an assigment we look at the last 
-		// scanned token
 		case TOK_IDENTIFIER:
-			tmp = NULL;
-			break;
+			type = assign_tok_to_ast(fb->next_token.type);
+			if (type) {
+				lex_next_token(fb);
+				return parse_assignment(fb, table, type);
+			}
+			else {
+				syntax_warning(token.err_loc, "result unused");
+				return parse_expression(fb, table, 0);
+			}
 
 		default:
-
-			// assignment
-			type = assign_tok_to_ast(token.type);
-			if (type) {
-				tmp = parse_assignment(fb, table, type);
-				break;
-			}
 
 			// declaration
 			type = type_spec_tok_to_ast(token.type);
 			if (type) {
-				printf("got here\n");
-				parse_declaration(fb, table);
-				tmp = NULL;
-				break;
+				return parse_declaration(fb, table);
 			}
 
 			printf("token type : %s\n", lex_tok_str(fb->curr_token.type));
 			assert(false);
 			break;
 	}
+
+	return NULL;
 }
 
 static struct ast_node*
 parse_compound_statement(struct lex_file_buffer *fb, struct sym_table *table)
 {
-	struct ast_node *tmp = NULL, *tree = NULL;
-	struct lex_token token;
-	enum   ast_type type;
-
+	struct ast_node *left = NULL, *tree = NULL;
 	assert(fb->curr_token.type == TOK_BRACE_OPEN);
 
 	for (;;) {
-		token = lex_next_token(fb);	
-
-		switch (token.type) {
-			case TOK_KEY_IF:
-				tmp = parse_if_statement(fb, table);
-				break;
-
-			case TOK_KEY_ELSE:
-				syntax_error(token.err_loc, "no maching if statement");
-				break;
-
-			case TOK_KEY_WHILE:
-				tmp = parse_while_loop(fb, table);
-				break;
-
-			case TOK_BRACE_OPEN:
-				tmp	= parse_compound_statement(fb, table);
-				break;
-
-			case TOK_BRACE_CLOSED:
-				return tree; 
-
-			// We just skip an identifier for now,
-			// since if it is an assigment we look at the last 
-			// scanned token
-			case TOK_IDENTIFIER:
-				tmp = NULL;
-				break;
-
-			default:
-
-				// assignment
-				type = assign_tok_to_ast(token.type);
-				if (type) {
-					tmp = parse_assignment(fb, table, type);
-					break;
-				}
-
-				// declaration
-				type = type_spec_tok_to_ast(token.type);
-				if (type) {
-					printf("got here\n");
-					parse_declaration(fb, table);
-					tmp = NULL;
-					break;
-				}
-
-				printf("token type : %s\n", lex_tok_str(fb->curr_token.type));
-				assert(false);
-				break;
+		tree = parse_statement(fb, table);
+		
+		if (tree) {
+			if (!left)
+				left = tree;
+			else
+				left = make_ast_node(AST_NOP, left, NULL, tree);
 		}
 
-		if (tmp) {
-			if (!tree)
-				tree = tmp;
-			else {
-				assert(tree != tmp);
-				tree = make_ast_node(AST_NOP, tree, NULL, tmp);
-			}
+		if (fb->curr_token.type == TOK_BRACE_OPEN) {
+			lex_next_token(fb);
+			parse_compound_statement(fb, table);
 		}
+		else if (fb->curr_token.type == TOK_BRACE_CLOSED) {
+			lex_next_token(fb);
+			return left;
+		}
+
 	}
 }
 
