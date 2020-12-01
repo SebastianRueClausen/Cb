@@ -8,23 +8,13 @@
 #include <stdio.h>
 #include <string.h>
 
-struct err_location
-err_loc(const struct lex_file_buffer *fb)
-{
-	struct err_location loc = { 
-		.line	  = fb->line,
-		.col	  = fb->col,
-		.filename = fb->filename
-	};
+/*
+ * parses the raw text into tokens
+ */
 
-	return loc;
-}
-
-static const char *tok_str[_TOK_COUNT + 1] = {
+static const char *tok_str[_TOK_COUNT] = {
 	"TOK_UNKNOWN",
-	"TOK_CONSTANT_INT",
-	"TOK_CONSTANT_FLOAT",
-	"TOK_CONSTANT_STRING",
+	"TOK_LIT",
 	"TOK_PLUS",
 	"TOK_MINUS",
 	"TOK_STAR",
@@ -113,152 +103,103 @@ lex_tok_str(enum lex_token_type type)
 	return tok_str[type];
 }
 
-void
-lex_load_file_buffer(struct lex_file_buffer *fb, const char *filename)
-{
-	unsigned int filename_size;
-	unsigned int file_size;
-	FILE *file = fopen(filename, "r");
-
-	if (!file) {
-		fatal_error("%s: No such file", filename);
-	}
-
-	fseek(file, 0, SEEK_END);
-	file_size = ftell(file);
-	rewind(file);
-
-	fb->start = c_malloc(file_size);
-	fb->curr = fb->start;
-	fb->end	= fb->start + file_size;
-
-	filename_size = strlen(filename);
-	fb->filename  = c_malloc(filename_size);
-	strncpy(fb->filename, filename, filename_size);
-
-	fb->line = 1;
-	fb->col	 = 1;
-
-	if (!fread(fb->start, 1, file_size, file)) {
-		fatal_error("Failure reading %s", filename);
-	}
-
-	fclose(file);
-
-	// lex the first node, so next lex_next_token gets the first node
-	lex_next_token(fb);	
-}
-
-void
-lex_cleanup_file_buffer(struct lex_file_buffer *fb)
-{
-	c_free(fb->start);
-	c_free(fb->filename);
-
-	fb->col	  = 0;
-	fb->line  = 0;
-	fb->start = NULL;
-	fb->curr  = NULL;
-	fb->end	  = NULL;
-}
-
 static char
-next(struct lex_file_buffer *fb)
+next(struct lex_instance *in)
 {
 	char c;
 
-	if (fb->curr != fb->end) {
-		c = *(++fb->curr);
+	if (in->curr != in->end) {
+		c = *(++in->curr);
 	} else {
 		return '\0';
 	}
 
 	if (c == '\n') {
-		++fb->line;
-		fb->col = 1;
+		++in->line;
+		in->col = 1;
 	} else {
-		++fb->col;
+		++in->col;
 	}
 
 	return c;
 }
 
 static void
-skip(struct lex_file_buffer *fb, int n)
+skip(struct lex_instance *in, uint32_t n)
 {
-	int i;
+	uint32_t i;
 	for (i = 0; i < n; ++i) {
-		next(fb);
+		next(in);
 	}
 }
 
 static char
-skip_single_line_comment(struct lex_file_buffer *fb)
+skip_single_line_comment(struct lex_instance *in)
 {
-	char c = *fb->curr;
+	char c = *in->curr;
 
 	while (c != '\n' && c != '\0')
-		c = next(fb);
+		c = next(in);
 
-	c = next(fb);
+	c = next(in);
 
 	return c;
 }
 
 static char
-skip_multi_line_comment(struct lex_file_buffer *fb)
+skip_multi_line_comment(struct lex_instance *in)
 {
 	// skip opening /*
-	skip(fb, 2);
+	skip(in, 2);
 
-	while (fb->curr != fb->end) {
-		if (fb->curr[0] == '*') {
-			if (fb->curr[1] == '/') {
-				skip(fb, 2);
-				return *fb->curr;
+	while (in->curr != in->end) {
+		if (in->curr[0] == '*') {
+			if (in->curr[1] == '/') {
+				skip(in, 2);
+				return *in->curr;
 			}
 		}
-		next(fb);
+		next(in);
 	}
 
-	syntax_error(err_loc(fb), "Unexpected end of file in comment");
+	syntax_error(err_loc(in), "Unexpected end of file in comment");
 	return '\0';
 }
 
 static char
-skip_whitespace_and_comments(struct lex_file_buffer *fb)
+skip_whitespace_and_comments(struct lex_instance *in)
 {
 	for (;;) {
-		switch (*fb->curr) {
+		switch (*in->curr) {
 			case ' ':
 			case '\n':
 			case '\t':
 			case '\r':
 			case '\v':
 			case '\f':
-				next(fb);
+				next(in);
 				break;
 
 			case '/':
-				if (fb->curr[1] == '*') {
-					skip_multi_line_comment(fb);
-				} else if (fb->curr[1] == '/') {
-					skip_single_line_comment(fb);
+				if (in->curr[1] == '*') {
+					skip_multi_line_comment(in);
+				} else if (in->curr[1] == '/') {
+					skip_single_line_comment(in);
 				} else {
-					return *fb->curr;
+					return *in->curr;
 				}
 				break;
 
-			default: return *fb->curr;
+			default: return *in->curr;
 		}
 	}
 }
 
 static int
-word_len(const struct lex_file_buffer *fb)
+word_len(const struct lex_instance *in)
 {
-	int i			= 0;
-	const char *str = fb->curr;
+	uint32_t i = 0;
+	const char *str = in->curr;
 
 	while (str[i]) {
 		if (isalpha(str[i]) || str[i] == '_' || isdigit(str[i]))
@@ -267,15 +208,15 @@ word_len(const struct lex_file_buffer *fb)
 			return i;
 	}
 
-	syntax_error(err_loc(fb), "Unexpected end of file");
+	syntax_error(err_loc(in), "Unexpected end of file");
 	return 0;
 }
 
 static int
-number_len(const struct lex_file_buffer *fb)
+number_len(const struct lex_instance *in)
 {
-	int i			= 0;
-	const char *str = fb->curr;
+	uint32_t i = 0;
+	const char *str = in->curr;
 
 	while (str[i]) {
 		if (isdigit(str[i]) || str[i] == '.')
@@ -284,15 +225,15 @@ number_len(const struct lex_file_buffer *fb)
 			return i;
 	}
 
-	syntax_error(err_loc(fb), "Unexpected end of file");
+	syntax_error(err_loc(in), "Unexpected end of file");
 	return 0;
 }
 
 static int
-string_len(const struct lex_file_buffer *fb)
+string_len(const struct lex_instance *in)
 {
-	int i			= 0;
-	const char *str = fb->curr;
+	uint32_t i = 0;
+	const char *str = in->curr;
 
 	while (str[i]) {
 		if (str[i] != '"')
@@ -301,15 +242,15 @@ string_len(const struct lex_file_buffer *fb)
 			return i;
 	}
 
-	syntax_error(err_loc(fb), "Unexpected end of file inside string");
+	syntax_error(err_loc(in), "Unexpected end of file inside string");
 	return 0;
 }
 
 static int
-char_len(const struct lex_file_buffer *fb)
+char_len(const struct lex_instance *in)
 {
-	int i = 0, slashes = 0;
-	const char *str = fb->curr;
+	uint32_t i = 0, slashes = 0;
+	const char *str = in->curr;
 
 	while (str[i]) {
 		if (str[i] == '\'') {
@@ -329,16 +270,37 @@ char_len(const struct lex_file_buffer *fb)
 		}
 	}
 
-	syntax_error(err_loc(fb), "Unexpected end of file inside char literal");
+	syntax_error(err_loc(in), "Unexpected end of file inside char literal");
 
 	return 0;
 }
 
-static enum lex_token_type
-parse_decimal_constant(const char *str, int len, int64_t *val)
+static struct type_info
+pare_suffix(struct lex_instance *lex_in)
 {
-	int i		 = 0;
-	int64_t tmp	 = 0;
+	switch (tolower(*lex_in->curr)) {
+		case 'u':
+			if (tolower(lex_in->curr[1]) == 'l') {
+							
+			}
+			break;
+
+		case 'l':
+		case 'L':
+			break;
+
+		case 'f':
+		case 'F':
+			break;
+
+	}
+}
+
+static enum type_literal_type
+parse_decimal_constant(const char *str, uint32_t len, uint64_t *val)
+{
+	uint32_t i = 0;
+	int64_t tmp	= 0;
 	double d_tmp = 0, k = 0.1;
 
 	while (i != len && str[i] != '.') {
@@ -348,7 +310,7 @@ parse_decimal_constant(const char *str, int len, int64_t *val)
 
 	if (str[i] != '.') {
 		*val = tmp;
-		return TOK_INT_LIT;
+		return TYPE_LIT_INT;
 	}
 
 	++i;
@@ -361,14 +323,14 @@ parse_decimal_constant(const char *str, int len, int64_t *val)
 	}
 
 	*((double *)val) = d_tmp;
-	return TOK_FLOAT_LIT;
+	return TYPE_LIT_INT;
 }
 
-static enum lex_token_type
-parse_octal_constant(const char *str, int len, int64_t *val)
+static enum type_literal_type
+parse_octal_constant(const char *str, uint32_t len, uint64_t *val)
 {
-	int i		 = 0;
-	int64_t tmp	 = 0;
+	uint32_t i = 0;
+	int64_t tmp	= 0;
 	double d_tmp = 0, k = 0.125;
 
 	while (i != len && str[i] != '.') {
@@ -378,7 +340,7 @@ parse_octal_constant(const char *str, int len, int64_t *val)
 
 	if (str[i] != '.') {
 		*val = tmp;
-		return TOK_INT_LIT;
+		return TYPE_LIT_INT;
 	}
 
 	++i;
@@ -391,23 +353,23 @@ parse_octal_constant(const char *str, int len, int64_t *val)
 	}
 
 	*((double *)val) = d_tmp;
-	return TOK_FLOAT_LIT;
+	return TYPE_LIT_FLOAT;
 }
 
-static enum lex_token_type
-parse_hex_constant(const char *str, int len, int64_t *val)
+static enum type_literal_type
+parse_hex_constant(const char *str, uint32_t len, uint64_t *val)
 {
-	int i		= 0;
+	uint32_t i = 0;
 	int64_t tmp = 0;
 
 	while (i != len) {
-		if (str[i] >= 'a' && str[i] <= 'f')
+		if (str[i] >= 'a' && str[i] <= 'f') {
 			tmp = tmp * 16 + str[i] - 0x57;
-		else if (str[i] >= 'A' && str[i] <= 'F')
+		} else if (str[i] >= 'A' && str[i] <= 'F') {
 			tmp = tmp * 16 + str[i] - 0x37;
-		else
+		} else {
 			tmp = tmp * 16 + str[i] - '0';
-
+		}
 		++i;
 	}
 
@@ -415,30 +377,31 @@ parse_hex_constant(const char *str, int len, int64_t *val)
 
 	// TODO add floating point hex literals
 
-	return TOK_INT_LIT;
+	return TYPE_LIT_INT;
 }
 
 static void
-parse_string_literal(const char *str, int len, char *buffer)
+parse_string_literal(const char *str, uint32_t len, char *buffer)
 {
 }
 
-static int
-parse_multichar_constant(const struct lex_file_buffer *fb, int len)
+static int32_t
+parse_multichar_constant(const struct lex_instance *in, uint32_t len)
 {
-	syntax_warning(err_loc(fb), "multi-character constant");
+	syntax_warning(err_loc(in), "multi-character constant");
 
-	if (len >= 6)
-		syntax_warning(err_loc(fb), "multi-character constant is too long");
+	if (len >= 6) {
+		syntax_warning(err_loc(in), "multi-character constant is too long");
+	}
 
-	return fb->curr[len - 1];
+	return in->curr[len - 1];
 }
 
 static int
-parse_char_literal(const struct lex_file_buffer *fb, int len)
+parse_char_literal(const struct lex_instance *in, uint32_t len)
 {
-	int64_t c		= 0;
-	const char *str = fb->curr;
+	uint64_t c		= 0;
+	const char *str = in->curr;
 
 	switch (len) {
 		case 1: return str[0];
@@ -469,10 +432,10 @@ parse_char_literal(const struct lex_file_buffer *fb, int len)
 						parse_hex_constant(str + 2, len - 2, &c);
 						return c;
 					default:
-						syntax_error(err_loc(fb), "Invalid escape sequence");
+						syntax_error(err_loc(in), "Invalid escape sequence");
 				}
 			} else
-				return parse_multichar_constant(fb, len);
+				return parse_multichar_constant(in, len);
 			break;
 
 		case 3:
@@ -493,37 +456,39 @@ parse_char_literal(const struct lex_file_buffer *fb, int len)
 						parse_hex_constant(str + 2, len - 2, &c);
 						return c;
 					case 'u':
-						syntax_error(err_loc(fb),
+						syntax_error(err_loc(in),
 									 "Unicode is yet to be implemented");
 						return 0;
 					default:
-						syntax_error(err_loc(fb), "Invalid escape sequence");
+						syntax_error(err_loc(in), "Invalid escape sequence");
 						return 0;
 				}
 			} else
-				return parse_multichar_constant(fb, len);
+				return parse_multichar_constant(in, len);
 			break;
 
 		case 8:
 			if (str[0] == '\\') {
 				if (str[1] == 'U') {
-					syntax_error(err_loc(fb),
+					syntax_error(err_loc(in),
 								 "Unicode is yet to be implemented");
 				}
 			} else {
-				return parse_multichar_constant(fb, len);
+				return parse_multichar_constant(in, len);
 			}
 			break;
 
-		default: return parse_multichar_constant(fb, len);
+		default:
+			return parse_multichar_constant(in, len);
 	}
 
 	assert(false);
 	return 0;
 }
 
+/* lookup table with pre hashed values for keywords */
 static enum lex_token_type
-lookup_keyword(int64_t hash, int len)
+lookup_keyword(int64_t hash, uint32_t len)
 {
 	switch (len) {
 		case 2:
@@ -614,7 +579,7 @@ lookup_keyword(int64_t hash, int len)
 }
 
 static enum lex_token_type
-lookup_symbol(const char *str, int *symbol_len)
+lookup_symbol(const char *str, uint32_t *symbol_len)
 {
 	switch (*str) {
 		case '+':
@@ -765,47 +730,139 @@ lookup_symbol(const char *str, int *symbol_len)
 	return TOK_UNKNOWN;
 }
 
+/* ================================================================================= */
+
+struct err_location
+err_loc(const struct lex_instance *lex_in)
+{
+	struct err_location loc = { 
+		.line = lex_in->line,
+		.col = lex_in->col,
+		.filename = lex_in->filename
+	};
+
+	return loc;
+}
+
+struct lex_instance
+lex_create_instance(const char *filename)
+{
+	uint32_t filename_size;
+	size_t file_size;
+	struct lex_instance lex_in;
+	FILE *file = fopen(filename, "r");
+
+	if (!file) {
+		fatal_error("%s: No such file", filename);
+	}
+
+	fseek(file, 0, SEEK_END);
+	file_size = ftell(file);
+	rewind(file);
+
+	lex_in.start = c_malloc(file_size);
+	lex_in.curr = lex_in.start;
+	lex_in.end	= lex_in.start + file_size;
+
+	filename_size = strlen(filename);
+	lex_in.filename  = c_malloc(filename_size);
+	strncpy(lex_in.filename, filename, filename_size);
+
+	lex_in.line = 1;
+	lex_in.col = 1;
+
+	if (!fread(lex_in.start, 1, file_size, file)) {
+		fatal_error("Failure reading %s", filename);
+	}
+
+	fclose(file);
+
+	/* lex the first node, so next lex_next_token gets the first node */
+	lex_next_token(&lex_in);	
+	
+	return lex_in;
+}
+
+void
+lex_destroy_instance(struct lex_instance *in)
+{
+	c_free(in->start);
+	c_free(in->filename);
+
+	in->col	  = 0;
+	in->line  = 0;
+	in->start = NULL;
+	in->curr  = NULL;
+	in->end	  = NULL;
+}
+
+
 struct lex_token
-lex_next_token(struct lex_file_buffer *fb)
+lex_next_token(struct lex_instance *in)
 {
 	char c;
-	int token_len;
+	uint32_t token_len;
+	enum type_literal_type lit_type;
 
-	c = skip_whitespace_and_comments(fb);
+	c = skip_whitespace_and_comments(in);
 
-	fb->last_token = fb->curr_token;
-	fb->curr_token = fb->next_token;
+	in->last_token = in->curr_token;
+	in->curr_token = in->next_token;
 
 	if (isalpha(c) || c == '_') {
-		token_len = word_len(fb);
-		fb->next_token.hash = sym_hash(fb->curr, token_len);
-		fb->next_token.type = lookup_keyword(fb->next_token.hash, token_len);
-		skip(fb, token_len);
-	}
-	else if (isdigit(c) || (c == '.' && isdigit(fb->curr[1]))) {
-		token_len = number_len(fb);
-		fb->next_token.type = parse_decimal_constant(
-			fb->curr, token_len, &fb->curr_token.value.val_int);
-		skip(fb, token_len);
-	}
-	else if (c == '"') {
-		fb->next_token.type = TOK_STRING_LIT;
-		next(fb);
-		token_len = string_len(fb);
-		skip(fb, token_len + 1);
-	}
-	else if (c == '\'') {
-		fb->next_token.type = TOK_INT_LIT;
-		next(fb);
-		token_len = char_len(fb);
-		fb->next_token.value.val_int = parse_char_literal(fb, token_len);
-		skip(fb, token_len + 1);
-	}
-	else {
-		fb->next_token.type = lookup_symbol(fb->curr, &token_len);
-		skip(fb, token_len);
+		token_len = word_len(in);
+		in->next_token.hash = sym_hash(in->curr, token_len);
+		in->next_token.type = lookup_keyword(in->next_token.hash, token_len);
+		skip(in, token_len);
+	} else if (isdigit(c) || (c == '.' && isdigit(in->curr[1]))) {
+		in->next_token.type = TOK_LITERAL;
+
+		token_len = number_len(in);
+
+		lit_type = parse_decimal_constant(in->curr, token_len,
+			&in->next_token.literal.value.val_int);
+
+		/* set type */
+		in->next_token.literal.type = type_deduct_from_literal(
+			in->next_token.literal.value,
+			lit_type
+		);
+
+
+		skip(in, token_len);
+		
+	} else if (c == '"') {
+		/* TODO add parsing for strings, and remember deducting the type */
+		in->next_token.type = TOK_LITERAL;
+
+		next(in);
+
+		token_len = string_len(in);
+
+		skip(in, token_len + 1);
+
+	} else if (c == '\'') {
+		in->next_token.type = TOK_LITERAL;
+
+		next(in);
+		token_len = char_len(in);
+
+		/* get value */
+		in->next_token.literal.value.val_int = parse_char_literal(in, token_len);
+		/* set type */
+		in->next_token.literal.type = type_deduct_from_literal(
+				in->next_token.literal.value,
+				TYPE_LIT_INT
+		);
+		
+
+
+		skip(in, token_len + 1);
+	} else {
+		in->next_token.type = lookup_symbol(in->curr, &token_len);
+		skip(in, token_len);
 	}
 
-	fb->next_token.err_loc = err_loc(fb);
-	return fb->curr_token;
+	in->next_token.err_loc = err_loc(in);
+	return in->curr_token;
 }

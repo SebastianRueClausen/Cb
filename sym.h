@@ -1,57 +1,61 @@
 #ifndef SYM_H
 #define SYM_H
 
+#include "def.h"
+#include "type.h"
+
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-enum sym_spec
+/* returned if no */
+#define SYM_NOT_FOUND -1
+
+enum sym_kind
 {
-	SYM_CONST				= 1 << 0,
-	SYM_EXTERN				= 1 << 1,
-	SYM_LONG				= 1 << 2,
-	SYM_REGISTER			= 1 << 3,
-	SYM_SIGNED				= 1 << 4,
-	SYM_STATIC				= 1 << 5,
-	SYM_UNSIGNED			= 1 << 6,
-	SYM_VOLATILE			= 1 << 7,
-	SYM_SHORT				= 1 << 8
+	SYM_KIND_FUNCTION,
+	SYM_KIND_VARIABLE
 };
 
-enum sym_type
+enum sym_compat
 {
-	SYM_NONE, SYM_INT, SYM_FLOAT, SYM_CHAR, SYM_DOUBLE
+	SYM_COMPAT_INCOMPAT,
+	SYM_COMPAT_COMPAT,
+	SYM_COMPAT_WIDEN_LEFT,
+	SYM_COMPAT_WIDEN_RIGHT
 };
 
 struct sym_entry
 {
-	enum sym_spec			specifiers;
-	enum sym_type			type;
+	struct type_info		type;
+	enum sym_kind			kind;
 	int64_t					hash;
 };
-
 
 struct sym_table
 {
 	struct sym_entry		*entries;
-	int						entry_count;
-	int						entry_allocated;
+	uint32_t				entry_count;
+	uint32_t				entry_allocated;
 };
 
 int64_t
-sym_hash(const char *key, int len);
+sym_hash(const char *key, uint32_t len);
 
 void
-sym_create_table(struct sym_table *table, int count);
+sym_create_table(struct sym_table *table, uint32_t count);
 
-int
+uint32_t
 sym_add_entry(struct sym_table *table, struct sym_entry entry);
 
 void
-sym_cleanup_table(struct sym_table *table);
+sym_destroy_table(struct sym_table *table);
 
-int
-sym_find_entry(const struct sym_table *table, int64_t hash);
+int32_t
+sym_find_id(const struct sym_table *table, int64_t hash);
+
+struct sym_entry*
+sym_get_entry(const struct sym_table *table, uint32_t id);
 
 void
 sym_print(const struct sym_entry *entry);

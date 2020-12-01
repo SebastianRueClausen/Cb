@@ -7,31 +7,18 @@
 #include <stdbool.h>
 #include <stdio.h>
 
-static const int ast_precedence[_AST_COUNT] =
-{
-	[AST_UNDEF]				= -1,
+/*
+ * We parse the token inputstream, and parse them into a more abstract
+ * and lower level abstract syntax tree,
+ * which make sure the syntax is correct, expression happen in the right
+ * order and prepares the syntax for optimization and code generation.
+ */
 
-	[AST_IDENTIFIER]		= 0,
-	[AST_INT_LIT]			= 0,
-	[AST_CHAR_LIT]			= 0,
-	[AST_FLOAT_LIT]			= 0,
+#define DEBUG 1 
 
-	[AST_ADD]				= 1, 
-	[AST_MIN]				= 1,
+#ifdef DEBUG
 
-	[AST_MUL]				= 2,
-	[AST_DIV]				= 2,
-
-	[AST_EQUAL]				= 3,
-	[AST_NOT_EQUAL]			= 3,
-
-	[AST_LESSER]			= 4,
-	[AST_GREATER]			= 4,
-	[AST_LESSER_EQUAL]		= 4,
-	[AST_GREATER_EQUAL]		= 4,
-};
-
-static const char* ast_str[_AST_COUNT] =
+static const char* ast_str[] =
 {	
 	"AST_UNDEF",
 	"AST_ADD",
@@ -46,11 +33,18 @@ static const char* ast_str[_AST_COUNT] =
 	"AST_LESSER_EQUAL",
 	"AST_GREATER_EQUAL",
 
+	"AST_UNARY_PLUS",
+	"AST_UNARY_MINUS",
+
+	"AST_PRE_INCREMENT",
+	"AST_PRE_DECREMENT",
+
+	"AST_DEREF",
+	"AST_ADDRESS",
+
 	"AST_ASSIGN",
 
-	"AST_INT_LIT",
-	"AST_CHAR_LIT",
-	"AST_FLOAT_LIT",
+	"AST_LITERAL",
 	
 	"AST_IF",
 	"AST_WHILE",
@@ -65,6 +59,18 @@ ast_to_str(enum ast_type type)
 {
 	return ast_str[type];
 }
+
+#else
+
+const char*
+ast_to_str(enum ast_type type)
+{
+	type = 0;
+	return "DEBUG";
+}
+
+#endif
+
 
 static enum ast_type
 op_tok_to_ast(enum lex_token_type tok)
@@ -90,6 +96,8 @@ op_tok_to_ast(enum lex_token_type tok)
 			return AST_LESSER;
 		case TOK_LESSER_OR_EQUAL:
 			return AST_LESSER_EQUAL;
+		case TOK_ASSIGN:
+			return AST_ASSIGN;
 		default:
 			return AST_UNDEF;
 	}
@@ -110,385 +118,599 @@ static bool
 is_rvalue(enum lex_token_type tok)
 {
 	switch (tok) {
-		case TOK_INT_LIT:
-		case TOK_FLOAT_LIT:
+		case TOK_LITERAL:
 			return true;
 		default:
 			return false;
 	}
 }
 
+/* allocate and create ast node */
 static struct ast_node*
-make_ast_node(enum ast_type type, struct ast_node *left,
+make_ast_node(struct ast_instance *ast_in, enum ast_type type, struct ast_node *left,
 			  struct ast_node *center, struct ast_node *right)
 {
 	struct ast_node *node;
 
-	node					= c_malloc(sizeof(struct ast_node));
-	node->left				= left;
-	node->center			= center;
-	node->right				= right;
-	node->type				= type;
+	node = mem_pool_alloc(&ast_in->pool, sizeof(struct ast_node));
+	node->left = left;
+	node->center = center;
+	node->right	= right;
+	node->type = type;
 
 	return node;
 }
 
+/* determine the datatype and create a node*/
 static struct ast_node*
-make_rvalue_node(const struct lex_token *token)
+make_rvalue_node(struct ast_instance *ast_in, const struct lex_token *token)
 {
 	struct ast_node *node;
 
 	switch (token->type) {
-		case TOK_INT_LIT:
-			if (token->value.val_int >= 0 && token->value.val_int < 255) {
-				node = make_ast_node(AST_CHAR_LIT, NULL, NULL, NULL);
-			}
-			else {
-				node = make_ast_node(AST_INT_LIT, NULL, NULL, NULL);
-			}
+		case TOK_LITERAL:
+			node = make_ast_node(ast_in, AST_LITERAL, NULL, NULL, NULL);
+			node->literal.value = token->literal.value;
 			break;
-
-		case TOK_FLOAT_LIT:
-			node = make_ast_node(AST_FLOAT_LIT, NULL, NULL, NULL);
 
 		default:
 			assert(false);
+			break;
 	}
 
-	node->value = token->value;
+	node->value_type = AST_RVALUE;	
 
 	return node;
 }
 
+/* assumes the symbol already exists and creates a node */
 static struct ast_node*
-make_lvalue_node(const struct lex_token *token, const struct sym_table *table)
+make_lvalue_node(struct ast_instance *ast_in, const struct lex_token *token)
 {
-	int id;
+	int32_t id;
 	struct ast_node *node;
 
-	id = sym_find_entry(table, token->hash);
+	id = sym_find_id(ast_in->sym_table, token->hash);
 
-	if (id == -1)
+	if (id == SYM_NOT_FOUND) {
 		syntax_error(token->err_loc, "use of undeclared identifier");
+	}
 
-	node = make_ast_node(AST_IDENTIFIER, NULL, NULL, NULL);
-	node->id = id;
+	node = make_ast_node(ast_in, AST_IDENTIFIER, NULL, NULL, NULL);
+	node->sym_id = id;
 	
 	return node;
 }
 
+/* parses prefix and insures the next token is valid */
 static struct ast_node*
-parse_expression(struct lex_file_buffer *fb, struct sym_table *table, int prev_prec)
+parse_prefix(struct ast_instance *ast_in)
+{
+	struct ast_node *node = NULL;
+
+	switch (ast_in->lex_in->curr_token.type) {
+		case TOK_PLUS:
+			lex_next_token(ast_in->lex_in);
+
+			if (ast_in->lex_in->curr_token.type == TOK_IDENTIFIER) {
+				node = make_lvalue_node(ast_in, &ast_in->lex_in->curr_token);
+			} else if (is_rvalue(ast_in->lex_in->curr_token.type)) {
+				node = make_rvalue_node(ast_in, &ast_in->lex_in->curr_token);
+			} else {
+				syntax_error(ast_in->lex_in->last_token.err_loc,
+						"unexpected operand for unary operator");
+			}
+
+			return make_ast_node(ast_in, AST_UNARY_PLUS, node, NULL, NULL);
+			
+		case TOK_MINUS:
+			lex_next_token(ast_in->lex_in);
+
+			if (ast_in->lex_in->curr_token.type == TOK_IDENTIFIER) {
+				node = make_lvalue_node(ast_in, &ast_in->lex_in->curr_token);
+			} else if (is_rvalue(ast_in->lex_in->curr_token.type)) {
+				node = make_rvalue_node(ast_in, &ast_in->lex_in->curr_token);
+			} else {
+				syntax_error(ast_in->lex_in->last_token.err_loc,
+						"unexpected operand for unary operator");
+			}
+
+			return make_ast_node(ast_in, AST_UNARY_MINUS, node, NULL, NULL);
+
+		case TOK_INCREASE:
+			lex_next_token(ast_in->lex_in);
+
+			if (ast_in->lex_in->curr_token.type == TOK_IDENTIFIER) {
+				node = make_lvalue_node(ast_in, &ast_in->lex_in->curr_token);
+			} else if (is_rvalue(ast_in->lex_in->curr_token.type)) {
+				syntax_error(ast_in->lex_in->last_token.err_loc, "r-value is not assignable");
+			} else {
+				syntax_error(ast_in->lex_in->last_token.err_loc, "prefix error");
+			}
+
+			return make_ast_node(ast_in, AST_PRE_INCREMENT, node, NULL, NULL);
+
+		case TOK_DECREASE:
+			lex_next_token(ast_in->lex_in);
+
+			if (ast_in->lex_in->curr_token.type == TOK_IDENTIFIER) {
+				node = make_lvalue_node(ast_in, &ast_in->lex_in->curr_token);
+			} else if (is_rvalue(ast_in->lex_in->curr_token.type)) {
+				syntax_error(ast_in->lex_in->last_token.err_loc, "r-value is not assignable");
+			} else {
+				syntax_error(ast_in->lex_in->last_token.err_loc, "prefix error");
+			}
+			
+			return make_ast_node(ast_in, AST_PRE_DECREMENT, node, NULL, NULL);
+
+		case TOK_AMPERSAND:
+			lex_next_token(ast_in->lex_in);
+
+			if (ast_in->lex_in->curr_token.type == TOK_IDENTIFIER) {
+				node = make_lvalue_node(ast_in, &ast_in->lex_in->curr_token);
+			} else if (is_rvalue(ast_in->lex_in->curr_token.type)) {
+				syntax_error(ast_in->lex_in->last_token.err_loc,
+						"can not take address of rvalue");
+			} else {
+				syntax_error(ast_in->lex_in->last_token.err_loc,
+						"expected expression");
+			}
+
+			return make_ast_node(ast_in, AST_ADDRESS, node, NULL, NULL);
+
+		case TOK_STAR:
+			lex_next_token(ast_in->lex_in);
+
+			if (ast_in->lex_in->curr_token.type == TOK_IDENTIFIER) {
+				node = make_lvalue_node(ast_in, &ast_in->lex_in->curr_token);
+			} else if (is_rvalue(ast_in->lex_in->curr_token.type)) {
+				syntax_error(ast_in->lex_in->last_token.err_loc,
+						"can not dereference rvalue");
+			} else {
+				syntax_error(ast_in->lex_in->last_token.err_loc,
+						"expected expression");
+			}
+
+			return make_ast_node(ast_in, AST_DEREF, node, NULL, NULL);
+
+		default:
+			return NULL;
+	}
+}
+
+/* pratt parser precendeces */
+static const int ast_precedence[_AST_COUNT] =
+{
+	[AST_UNDEF]				= -1,
+
+	[AST_IDENTIFIER]		= 0,
+	[AST_LITERAL]			= 0,
+
+	[AST_ADD]				= 1, 
+	[AST_MIN]				= 1,
+
+	[AST_MUL]				= 2,
+	[AST_DIV]				= 2,
+
+	[AST_EQUAL]				= 3,
+	[AST_NOT_EQUAL]			= 3,
+
+	[AST_LESSER]			= 4,
+	[AST_GREATER]			= 4,
+	[AST_LESSER_EQUAL]		= 4,
+	[AST_GREATER_EQUAL]		= 4,
+};
+
+static bool
+is_right_associavity(enum ast_type type)
+{
+	switch (type) {
+		case AST_ASSIGN:
+			return true;
+		default:
+			return false;
+	}
+}
+
+/* recursive pratt parser */
+static struct ast_node*
+parse_expression(struct ast_instance *ast_in, int32_t prev_prec,
+				 enum lex_token_type terminator)
 {
 	struct lex_token token, next_token;
-	struct ast_node *left = NULL, *right;
+	struct ast_node *left = NULL, *right, *tmp;
 	enum ast_type node_type;
 
-	// get value token
-	token = lex_next_token(fb);
+	/* get value token */
+	token = lex_next_token(ast_in->lex_in);
 
 	if (token.type == TOK_IDENTIFIER) {
-		left = make_lvalue_node(&token, table);
-	}
-	else if (is_rvalue(token.type)) {
-		left = make_rvalue_node(&token);	
-	}
-	else {
-		syntax_error(token.err_loc, "expected expression");
+		left = make_lvalue_node(ast_in, &token);
+	} else if (is_rvalue(token.type)) {
+		left = make_rvalue_node(ast_in, &token);
+	} else if (token.type == TOK_PAREN_OPEN) {
+		left = parse_expression(ast_in, 0, TOK_PAREN_CLOSED);
+	} else {
+		/* the only other valid option is a prefix */
+		left = parse_prefix(ast_in);
+
+		if (!left) {
+			syntax_error(token.err_loc, "expected expression");
+		}
 	}
 
-	// get op token
-	next_token = lex_next_token(fb);
-	if (next_token.type == TOK_SEMIKOLON || next_token.type == TOK_PAREN_CLOSED)
+	/* get op token */
+	next_token = lex_next_token(ast_in->lex_in);
+	if (next_token.type == terminator) {
 		return left;
+	}
 
 	node_type = op_tok_to_ast(next_token.type);
 	if (!node_type) {
-		printf("%s\n", lex_tok_str(next_token.type));
-		syntax_error(err_loc(fb), "expected expression");
+		syntax_error(err_loc(ast_in->lex_in), "expected expression");
 	}
 
-	while (prev_prec < ast_precedence[node_type]) {
-		right = parse_expression(fb, table, ast_precedence[node_type]);
-		left = make_ast_node(node_type, left, NULL, right);
+	/*
+	 * if the prev token precedence is lower than the prev token
+	 * we return (go up a level in the tree)
+	*/
+	while (prev_prec < ast_precedence[node_type] ||
+		   (is_right_associavity(node_type) &&
+		   prev_prec == ast_precedence[node_type])) {
 
-		if (fb->curr_token.type == TOK_SEMIKOLON ||
-			fb->curr_token.type == TOK_PAREN_CLOSED)
+		right = parse_expression(ast_in, ast_precedence[node_type], terminator);
+
+		/* we must handle assignment differently */
+		if (ast_in->lex_in->curr_token.type == TOK_ASSIGN) {
+			/* right must be an rvalue when assigning */
+			right->value_type = AST_RVALUE;
+
+			/* swap the right and left, so the right branch
+			 * will be generated first */
+			tmp		= left;	
+			left	= right;
+			right	= tmp;
+		} else {
+
+			/* since we arent doing assignment, both sides must be
+			 * rvalues */
+			left->value_type = AST_RVALUE;
+			right->value_type = AST_LVALUE;
+		}
+
+		left = make_ast_node(ast_in, node_type, left, NULL, right);
+
+		if (ast_in->lex_in->curr_token.type == terminator) {
 			return left;
+		}
 
-		node_type = op_tok_to_ast(fb->curr_token.type);
-		if (!node_type) 
-			syntax_error(err_loc(fb), "expected expression");
+		node_type = op_tok_to_ast(ast_in->lex_in->curr_token.type);
+		if (!node_type) {
+			syntax_error(ast_in->lex_in->curr_token.err_loc,
+					"expected expression");
+		}
 	}
 
 	return left;
 }
 
 static struct ast_node*
-parse_compound_statement(struct lex_file_buffer *fb, struct sym_table *table);
+parse_compound_statement(struct ast_instance *ast_in);
 
+// TODO should be declared static vvvvvvvvvvvvvvv
+/*
 static struct ast_node*
-parse_statement(struct lex_file_buffer *fb, struct sym_table *table);
+parse_statement(struct lex_instance *li, struct sym_table *table);
+*/
 
-
+// TODO this should be part of the expression
 static struct ast_node*
-parse_assignment(struct lex_file_buffer *fb, struct sym_table *table,
+parse_assignment(struct ast_instance *ast_in, struct sym_table *table,
 				 enum ast_type type)
 {
 	struct ast_node *left, *right;
-	int id;
+	int32_t id;
 
-	if (fb->last_token.type != TOK_IDENTIFIER)
-		syntax_error(fb->last_token.err_loc, "assigning to rvalue");
+	if (ast_in->lex_in->last_token.type != TOK_IDENTIFIER) {
+		syntax_error(ast_in->lex_in->last_token.err_loc, "assigning to rvalue");
+	}
 
-	id = sym_find_entry(table, fb->last_token.hash);
-	if (id == -1)
-		syntax_error(fb->last_token.err_loc, "use of undeclated identifier");
+	id = sym_find_id(table, ast_in->lex_in->last_token.hash);
 
-	right = make_ast_node(AST_IDENTIFIER, NULL, NULL, NULL);
+	if (id == SYM_NOT_FOUND) {
+		syntax_error(ast_in->lex_in->last_token.err_loc,
+				"use of undeclated identifier");
+	}
 
-	left = parse_expression(fb, table, 0);
-	assert(fb->curr_token.type == TOK_SEMIKOLON);
+	right = make_ast_node(ast_in, AST_IDENTIFIER, NULL, NULL, NULL);
 
-	left = make_ast_node(type, left, NULL, right);
+	left = parse_expression(ast_in, 0, TOK_SEMIKOLON);
+	assert(ast_in->lex_in->curr_token.type == TOK_SEMIKOLON);
+
+	left = make_ast_node(ast_in, type, left, NULL, right);
 
 	return left;	
 }
 
+/* asserts that we doesnt set a type prim more than once */
 inline static void
-set_sym_type(struct sym_entry *entry, enum sym_type type, const struct err_location *err_loc)
+set_type_prim(struct type_info *type, enum type_prim prim,
+			  const struct err_location *err_loc)
 {
-	if (entry->type)
-		syntax_error(*err_loc, "can not combine with prev specifier");			
-	else if (entry->type == type)
-		syntax_error(*err_loc, "duplicate specifier");
-	else
-		entry->type = type;
+	if (type->prim != TYPE_PRIM_NONE) {
+		syntax_error(*err_loc, "duplicate type specifier");
+	}
 
-	
+	type->prim = prim;
 }
 
+/* check that we doesnt set a type spec more than once,
+ * we check for conflicts such as signed and unsigned when we are done */
 inline static void
-set_sym_spec(struct sym_entry *entry, enum sym_spec spec, const struct err_location *err_loc)
+set_type_spec(struct type_info *type, enum type_spec spec,
+			  const struct err_location *err_loc)
 {
-	if (entry->specifiers & spec)
-		syntax_error(*err_loc, "duplicate specifier");
-	else
-		entry->specifiers |= spec;
+	if (type->spec & spec) {
+		syntax_error(*err_loc, "duplicate type specifier");
+	}
+
+	type->spec &= spec;
 }
 
+/* parse a list of symbol specifier */
 static struct sym_entry
-parse_sym_type(struct lex_file_buffer *fb)
+parse_sym_type(struct ast_instance *ast_in)
 {
 	struct sym_entry sym_entry;
 
-	sym_entry.specifiers = 0;
-	sym_entry.type = SYM_NONE;
+	sym_entry.type.spec = 0;
+	sym_entry.type.prim = TYPE_PRIM_NONE;
+	sym_entry.type.indirection = 0;
 	
 	for (;;) {
-		switch (fb->curr_token.type) {
+		switch (ast_in->lex_in->curr_token.type) {
 			case TOK_KEY_INT:
-				set_sym_type(&sym_entry, SYM_INT, &fb->curr_token.err_loc);
+				set_type_prim(&sym_entry.type, TYPE_PRIM_INT,
+						&ast_in->lex_in->curr_token.err_loc);
 				break;
+
 			case TOK_KEY_FLOAT:
-				set_sym_type(&sym_entry, SYM_FLOAT, &fb->curr_token.err_loc);	
+				set_type_prim(&sym_entry.type, TYPE_PRIM_FLOAT,
+						&ast_in->lex_in->curr_token.err_loc);
 				break;
+
 			case TOK_KEY_CHAR:
-				set_sym_type(&sym_entry, SYM_CHAR, &fb->curr_token.err_loc);	
+				set_type_prim(&sym_entry.type, TYPE_PRIM_CHAR,
+						&ast_in->lex_in->curr_token.err_loc);
 				break;
+
 			case TOK_KEY_DOUBLE:
-				set_sym_type(&sym_entry, SYM_DOUBLE, &fb->curr_token.err_loc);
+				set_type_prim(&sym_entry.type, TYPE_PRIM_DOUBLE,
+						&ast_in->lex_in->curr_token.err_loc);
 				break;
+
 			case TOK_KEY_CONST:
-				set_sym_spec(&sym_entry, SYM_CONST, &fb->curr_token.err_loc);
+				set_type_spec(&sym_entry.type, TYPE_SPEC_CONST,
+						&ast_in->lex_in->curr_token.err_loc);
 				break;
+
 			case TOK_KEY_STATIC:
-				set_sym_spec(&sym_entry, SYM_CONST, &fb->curr_token.err_loc);
+				set_type_spec(&sym_entry.type, TYPE_SPEC_STATIC,
+						&ast_in->lex_in->curr_token.err_loc);
 				break;
+
 			case TOK_KEY_UNSIGNED:
-				set_sym_spec(&sym_entry, SYM_UNSIGNED, &fb->curr_token.err_loc);
+				set_type_spec(&sym_entry.type, TYPE_SPEC_UNSIGNED,
+						&ast_in->lex_in->curr_token.err_loc);
 				break;
+
 			case TOK_KEY_SIGNED:
-				set_sym_spec(&sym_entry, SYM_SIGNED, &fb->curr_token.err_loc);
+				set_type_spec(&sym_entry.type, TYPE_SPEC_SIGNED,
+						&ast_in->lex_in->curr_token.err_loc);
 				break;
+
 			case TOK_KEY_SHORT:
-				set_sym_spec(&sym_entry, SYM_SHORT, &fb->curr_token.err_loc);	
+				set_type_spec(&sym_entry.type, TYPE_SPEC_SHORT,
+						&ast_in->lex_in->curr_token.err_loc);
 				break;
+
 			case TOK_KEY_LONG:
-				set_sym_spec(&sym_entry, SYM_LONG, &fb->curr_token.err_loc);
+				set_type_spec(&sym_entry.type, TYPE_SPEC_LONG,
+						&ast_in->lex_in->curr_token.err_loc);
 				break;
+
 			case TOK_KEY_REGISTER:
-				set_sym_spec(&sym_entry, SYM_REGISTER, &fb->curr_token.err_loc);
+				set_type_spec(&sym_entry.type, TYPE_SPEC_REGISTER,
+						&ast_in->lex_in->curr_token.err_loc);
 				break;
+
 			case TOK_KEY_VOLATILE:
-				set_sym_spec(&sym_entry, SYM_VOLATILE, &fb->curr_token.err_loc);
+				set_type_spec(&sym_entry.type, TYPE_SPEC_VOLATILE,
+						&ast_in->lex_in->curr_token.err_loc);
 				break;
+
 			case TOK_KEY_EXTERN:
-				set_sym_spec(&sym_entry, SYM_EXTERN, &fb->curr_token.err_loc);
+				set_type_spec(&sym_entry.type, TYPE_SPEC_EXTERN,
+						&ast_in->lex_in->curr_token.err_loc);
 				break;
+
 			default:
 				return sym_entry;
 		}
 
-		lex_next_token(fb);
-	}
-}
-
-static void
-check_sym_conflicts(struct sym_entry *entry, struct err_location *err_loc)
-{
-	switch (entry->type) {
-		case SYM_FLOAT:
-			if (entry->specifiers & SYM_SIGNED || entry->specifiers & SYM_UNSIGNED)
-				syntax_error(*err_loc, "type float can not be specified as signed or unsigned");
-			if (entry->specifiers & SYM_LONG)
-				syntax_error(*err_loc, "type float can not be specified as long");
-			if (entry->specifiers & SYM_SHORT)
-				syntax_error(*err_loc, "type float can not be specified as short");
-
-		case SYM_DOUBLE:	
-			if (entry->specifiers & SYM_SIGNED || entry->specifiers & SYM_UNSIGNED)
-				syntax_error(*err_loc, "type double can not be specified as signed or unsigned");
-			if (entry->specifiers & SYM_LONG)
-				syntax_error(*err_loc, "type double can not be specified as long");
-			if (entry->specifiers & SYM_SHORT)
-				syntax_error(*err_loc, "type double can not be specified as short");
-
-		default:
-			if (entry->specifiers & SYM_SIGNED && entry->specifiers & SYM_UNSIGNED)
-				syntax_error(*err_loc, "type can not be specified as signed and unsigned");
-			if (entry->specifiers & SYM_LONG && entry->specifiers & SYM_SHORT)
-				syntax_error(*err_loc, "type can not be specified as short and long");
+		lex_next_token(ast_in->lex_in);
 	}
 }
 
 static struct ast_node*
-parse_declaration(struct lex_file_buffer *fb, struct sym_table *table)
+parse_function_definition(struct ast_instance *ast_in, int32_t id);
+
+static struct ast_node*
+parse_function_declaration(struct ast_instance *ast_in, int32_t id)
 {
-	int id;
+	// @note skip params for now	
+	while (ast_in->lex_in->curr_token.type != TOK_PAREN_CLOSED) {
+		lex_next_token(ast_in->lex_in);
+	}
+
+	if (ast_in->lex_in->curr_token.type == TOK_SEMIKOLON) {
+		return NULL;
+	} else if (ast_in->lex_in->curr_token.type == TOK_BRACE_OPEN) {
+		return parse_function_definition(ast_in, id);		
+	} else {
+		syntax_error(ast_in->lex_in->curr_token.err_loc, "expeced semikolon");
+		assert(false);
+	}
+}
+
+/* called when we get a type specifier token */
+static struct ast_node*
+parse_declaration(struct ast_instance *ast_in, struct sym_table *table)
+{
+	int32_t id;
 	struct ast_node *right, *left;
 	struct sym_entry sym_entry;
+	enum lex_token_type tok_type;
 
-	sym_entry = parse_sym_type(fb);
+	/* loops through type specifiers */
+	sym_entry = parse_sym_type(ast_in);
 
-	assert(fb->curr_token.type == TOK_IDENTIFIER);
+	/* loop through stars to get indirection */
+	tok_type = ast_in->lex_in->curr_token.type;
 
-	sym_entry.hash = fb->curr_token.hash;
-	id = sym_find_entry(table, sym_entry.hash);
-	if (id == -1)
+	while (tok_type == TOK_STAR) {
+		++sym_entry.type.indirection;
+		tok_type = lex_next_token(ast_in->lex_in).type;
+	}
+
+	/* the next token after specifiers must be an identifier */
+	if (ast_in->lex_in->curr_token.type != TOK_IDENTIFIER) {
+		syntax_error(ast_in->lex_in->curr_token.err_loc,
+				"variabel must have a name");
+	}
+
+	sym_entry.hash = ast_in->lex_in->curr_token.hash;
+	id = sym_find_id(table, sym_entry.hash);
+
+	if (id == SYM_NOT_FOUND) {
 		id = sym_add_entry(table, sym_entry);
-	else
-		syntax_error(fb->curr_token.err_loc, "redefinition of variabel");
+	} else {
+		syntax_error(ast_in->lex_in->curr_token.err_loc, "redefinition of variabel");
+	}
 
-	check_sym_conflicts(&sym_entry, &fb->curr_token.err_loc);	
-	sym_print(&sym_entry);
+	type_check_conflicts(sym_entry.type, &ast_in->lex_in->curr_token.err_loc);	
 
 	// inline assignment
-	// should also check for assignment list
-	if (fb->next_token.type == TOK_ASSIGN) {
-		lex_next_token(fb);	
-		right = make_ast_node(AST_IDENTIFIER, NULL, NULL, NULL);
-		left = parse_expression(fb, table, 0);
-		left = make_ast_node(AST_ASSIGN, left, NULL, right);
+	// TODO should also check for assignment list
+	if (ast_in->lex_in->next_token.type == TOK_ASSIGN) {
+		lex_next_token(ast_in->lex_in);	
 
-		if (fb->curr_token.type != TOK_SEMIKOLON)
-			syntax_error(fb->curr_token.err_loc, "expected semikolon");
+		sym_get_entry(ast_in->sym_table, id)->kind = SYM_KIND_VARIABLE;	
+
+		right = make_ast_node(ast_in, AST_IDENTIFIER, NULL, NULL, NULL);
+		left = parse_expression(ast_in, 0, TOK_SEMIKOLON);
+		left = make_ast_node(ast_in, AST_ASSIGN, left, NULL, right);
+
+		if (ast_in->lex_in->curr_token.type != TOK_SEMIKOLON) {
+			syntax_error(ast_in->lex_in->curr_token.err_loc, "expected semikolon");
+		}
 
 		return left;
-	}
-	else if (fb->next_token.type == TOK_SEMIKOLON) {
-		lex_next_token(fb);
 
+	} else if (ast_in->lex_in->next_token.type == TOK_PAREN_OPEN) {
+		sym_get_entry(ast_in->sym_table, id)->kind = SYM_KIND_FUNCTION;	
+		return parse_function_declaration(ast_in, id);
+	} else if (ast_in->lex_in->next_token.type == TOK_SEMIKOLON) {
+		lex_next_token(ast_in->lex_in);
+		sym_get_entry(ast_in->sym_table, id)->kind = SYM_KIND_VARIABLE;	
 		return NULL;
-	}
-	else {
-		syntax_error(fb->curr_token.err_loc, "expected semikolon");
+	} else {
+		syntax_error(ast_in->lex_in->curr_token.err_loc, "expected semikolon");
 		return NULL;
 	}
 }
 
 static struct ast_node*
-parse_else_statement(struct lex_file_buffer *fb, struct sym_table *table)
+parse_else_statement(struct ast_instance *ast_in)
 {
-	lex_next_token(fb);
-	return parse_compound_statement(fb, table);
+	lex_next_token(ast_in->lex_in);
+	return parse_statement(ast_in);
 }
 
 static struct ast_node*
-parse_if_statement(struct lex_file_buffer *fb, struct sym_table *table)
+parse_if_statement(struct ast_instance *ast_in)
 {
 	struct ast_node *condition_ast, *true_ast, *false_ast;
 
-	assert(fb->curr_token.type == TOK_KEY_IF);	
+	assert(ast_in->lex_in->curr_token.type == TOK_KEY_IF);	
 
-	lex_next_token(fb);
-	assert(fb->curr_token.type == TOK_PAREN_OPEN);
+	lex_next_token(ast_in->lex_in);
+	assert(ast_in->lex_in->curr_token.type == TOK_PAREN_OPEN);
 
-	condition_ast = parse_expression(fb, table, 0);
+	condition_ast = parse_expression(ast_in, 0, TOK_PAREN_CLOSED);
 
-	assert(fb->curr_token.type == TOK_PAREN_CLOSED);
-	lex_next_token(fb);
+	lex_next_token(ast_in->lex_in);
 
-	true_ast = parse_statement(fb, table);
-	lex_next_token(fb);
+	true_ast = parse_statement(ast_in);
+	lex_next_token(ast_in->lex_in);
 	
-	if (fb->next_token.type == TOK_KEY_ELSE) {
-		lex_next_token(fb);
-		false_ast = parse_else_statement(fb, table);	
+	if (ast_in->lex_in->next_token.type == TOK_KEY_ELSE) {
+		lex_next_token(ast_in->lex_in);
+		false_ast = parse_else_statement(ast_in);
 	}
 	else {
 		false_ast = NULL;
 	}
 
-	return make_ast_node(AST_IF, condition_ast, true_ast, false_ast);
+	return make_ast_node(ast_in, AST_IF, condition_ast, true_ast, false_ast);
 }
 
 static struct ast_node*
-parse_while_loop(struct lex_file_buffer *fb, struct sym_table *table)
+parse_while_loop(struct ast_instance *ast_in)
 {
 	struct ast_node *condition_ast, *body_ast;
 
-	assert(fb->curr_token.type == TOK_KEY_WHILE);
+	assert(ast_in->lex_in->curr_token.type == TOK_KEY_WHILE);
 
-	lex_next_token(fb);
+	lex_next_token(ast_in->lex_in);
 
-	assert(fb->curr_token.type == TOK_PAREN_OPEN);
-	printf("got here\n");
+	assert(ast_in->lex_in->curr_token.type == TOK_PAREN_OPEN);
+	condition_ast = parse_expression(ast_in, 0, TOK_PAREN_CLOSED);
 
-	condition_ast = parse_expression(fb, table, 0);
+	assert(ast_in->lex_in->curr_token.type == TOK_PAREN_CLOSED);
+	lex_next_token(ast_in->lex_in);
 
-	assert(fb->curr_token.type == TOK_PAREN_CLOSED);
-	lex_next_token(fb);
+	body_ast = parse_compound_statement(ast_in);
 
-	body_ast = parse_compound_statement(fb, table);
-
-	return make_ast_node(AST_WHILE, condition_ast, NULL, body_ast);	
+	return make_ast_node(ast_in, AST_WHILE, condition_ast, NULL, body_ast);	
 }
 
 /*
 static struct ast_node*
-parse_for_loop(struct lex_file_buffer *fb, struct sym_table *table)
+parse_for_loop(struct lex_instance *li, struct sym_table *table)
 {
 	struct ast_node *tree, *condition_ast, *body_ast, *preop_ast, *postop_ast;
 
-	lex_next_token(fb);	
+	lex_next_token(li);	
 
-	if (fb->curr_token.type != TOK_PAREN_OPEN)
-		syntax_error(fb->curr_token.err_loc, "expected \'(\' after for");
+	if (li->curr_token.type != TOK_PAREN_OPEN) {
+		syntax_error(li->curr_token.err_loc, "expected \'(\' after for");
+	}
 	
 }
 */
 
-static struct ast_node*
-parse_statement(struct lex_file_buffer *fb, struct sym_table *table)
+/* creates an ast tree from a single statement, which can include compound statements */
+struct ast_node*
+parse_statement(struct ast_instance *ast_in)
 {
 	enum ast_type type;
-	struct lex_token token = fb->curr_token;
+	struct lex_token token = ast_in->lex_in->curr_token;
 	struct ast_node *tree;
 
 	switch (token.type) {
 		case TOK_KEY_IF:
-			return parse_if_statement(fb, table);
+			return parse_if_statement(ast_in);
 
 		case TOK_KEY_ELSE:
 			syntax_error(token.err_loc, "no maching if statement");
@@ -496,21 +718,24 @@ parse_statement(struct lex_file_buffer *fb, struct sym_table *table)
 			break;
 
 		case TOK_BRACE_OPEN:
-			return parse_compound_statement(fb, table);
+			return parse_compound_statement(ast_in);
 
 		case TOK_KEY_WHILE:
-			return parse_while_loop(fb, table);
+			return parse_while_loop(ast_in);
 
 		case TOK_IDENTIFIER:
-			type = assign_tok_to_ast(fb->next_token.type);
+			/*
+			type = assign_tok_to_ast(ast_in->lex_in->next_token.type);
 			if (type) {
-				lex_next_token(fb);
-				tree = parse_assignment(fb, table, type);
-			}
-			else {
+				lex_next_token(ast_in->lex_in);
+				tree = parse_assignment(ast_in, ast_in->sym_table, type);
+			} else {
 				syntax_warning(token.err_loc, "result unused");
-				tree = parse_expression(fb, table, 0);
+				tree = parse_expression(ast_in, 0, TOK_SEMIKOLON);
 			}
+			*/
+
+			tree = parse_expression(ast_in, 0, TOK_SEMIKOLON);
 			break;
 
 		case TOK_KEY_INT:	
@@ -525,110 +750,157 @@ parse_statement(struct lex_file_buffer *fb, struct sym_table *table)
 		case TOK_KEY_CONST:
 		case TOK_KEY_LONG:
 		case TOK_KEY_EXTERN:
-			tree = parse_declaration(fb, table);
+			tree = parse_declaration(ast_in, ast_in->sym_table);
 			break;
 
 		default:
-
-			syntax_error(token.err_loc, "internal : parse_statement : %s", lex_tok_str(token.type));
+			syntax_error(token.err_loc, "internal : parse_statement : %s",
+					lex_tok_str(token.type));
 			assert(false);
 			break;
 	}
 
-	if (fb->curr_token.type != TOK_SEMIKOLON)
-		syntax_error(fb->curr_token.err_loc, "expected semikolon");
-	else
-		lex_next_token(fb);
+	if (ast_in->lex_in->curr_token.type != TOK_SEMIKOLON) {
+		syntax_error(ast_in->lex_in->curr_token.err_loc, "expected semikolon");
+	} else {
+		lex_next_token(ast_in->lex_in);
+	}
 
 	return tree;
 }
 
+/* loops through all statements in a compound statement and creates an ast tree */
 static struct ast_node*
-parse_compound_statement(struct lex_file_buffer *fb, struct sym_table *table)
+parse_compound_statement(struct ast_instance *ast_in)
 {
 	struct ast_node *left = NULL, *tree = NULL;
-	assert(fb->curr_token.type == TOK_BRACE_OPEN);
-	lex_next_token(fb);
+
+	assert(ast_in->lex_in->curr_token.type == TOK_BRACE_OPEN);
+
+	lex_next_token(ast_in->lex_in);
 
 	for (;;) {
-		if (fb->curr_token.type == TOK_BRACE_CLOSED) {
-			lex_next_token(fb);
+		if (ast_in->lex_in->curr_token.type == TOK_BRACE_CLOSED) {
+			lex_next_token(ast_in->lex_in);
 			return left;
 		}
 
-		tree = parse_statement(fb, table);
+		tree = parse_statement(ast_in);
 		
 		if (tree) {
-			if (!left)
+			if (!left) {
 				left = tree;
-			else
-				left = make_ast_node(AST_NOP, left, NULL, tree);
+			} else {
+				left = make_ast_node(ast_in, AST_NOP, left, NULL, tree);
+			}
 		}
 	}
 }
 
-void
-ast_print_tree(struct ast_node *node, int level)
+static struct ast_node*
+parse_function_definition(struct ast_instance *ast_in, int32_t id)
 {
-	int i;
+	assert(ast_in->lex_in->curr_token.type == TOK_BRACE_OPEN);
+	id = 0;
+
+	return parse_compound_statement(ast_in);	
+}
+
+/* ===================================================================== */
+
+struct ast_instance
+ast_create_instance(struct lex_instance *lex_in, struct sym_table *table)
+{
+	const struct ast_instance ast_in =
+	{
+		.lex_in				= lex_in,
+		.pool				= mem_pool_create(1024),
+		.sym_table			= table
+	};
+
+	return ast_in;
+}
+
+void
+ast_destroy_instance(struct ast_instance *ast_in)
+{
+	ast_in->lex_in = NULL;
+	ast_in->tree = NULL;
+	mem_pool_destroy(&ast_in->pool);
+}
+
+void
+ast_print_tree(struct ast_node *node, uint32_t level)
+{
+	uint32_t i;
 
 	++level;
 	printf("%s\n", ast_to_str(node->type));
 	if (node->left) {
-		for (i = 0; i < level; ++i)
+		for (i = 0; i < level; ++i) {
 			printf("\t");
+		}
 		ast_print_tree(node->left, level);			
 	}
 	
 	if (node->center) {
-		for (i = 0; i < level; ++i)
+		for (i = 0; i < level; ++i) {
 			printf("\t");
+		}
 		ast_print_tree(node->center, level);			
 	}
 
 	if (node->right) {
-		for (i = 0; i < level; ++i)
+		for (i = 0; i < level; ++i) {
 			printf("\t");
+		}
 		ast_print_tree(node->right, level);
 	}
 }
 
 void
-ast_cleanup_tree(struct ast_node *node)
+ast_print_tree_postorder(struct ast_node *node)
 {
-	if (node->left)
-		ast_cleanup_tree(node->left);
+	if (!node) {
+		return;
+	}
 
-	if (node->center)
-		ast_cleanup_tree(node->center);
+	if (node->left) {
+		ast_print_tree_postorder(node->left);
+	}
 
-	if (node->right)
-		ast_cleanup_tree(node->right);
+	if (node->center) {
+		ast_print_tree_postorder(node->center);
+	}
 
-	c_free(node);
+	if (node->right) {
+		ast_print_tree_postorder(node->right);
+	}
+
+	printf("%s\n", ast_to_str(node->type));
+
 }
-
-
-
 
 
 void
 ast_test()
 {
-	struct lex_file_buffer fb;
-	struct ast_node *tree;
+	struct lex_instance lex_in;
+	struct ast_instance ast_in;
 	struct sym_table table;
 
-	lex_load_file_buffer(&fb, "../test/test4.c");
+	lex_in = lex_create_instance("../test/test4.c");
 	sym_create_table(&table, 10);
-	lex_next_token(&fb);
+	lex_next_token(&lex_in);
 
-	tree = parse_compound_statement(&fb, &table);
-	ast_print_tree(tree, 0);
+	ast_in = ast_create_instance(&lex_in, &table);
 
-	ast_cleanup_tree(tree);
-	lex_cleanup_file_buffer(&fb);
-	sym_cleanup_table(&table);
+	ast_in.tree = parse_statement(&ast_in);
+	ast_print_tree(ast_in.tree, 0);
+
+	ast_destroy_instance(&ast_in);
+	lex_destroy_instance(&lex_in);
+	sym_destroy_table(&table);
 
 }
 
