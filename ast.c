@@ -704,7 +704,6 @@ parse_for_loop(struct lex_instance *li, struct sym_table *table)
 struct ast_node*
 parse_statement(struct ast_instance *ast_in)
 {
-	enum ast_type type;
 	struct lex_token token = ast_in->lex_in->curr_token;
 	struct ast_node *tree;
 

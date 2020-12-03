@@ -2,7 +2,6 @@
 
 #include <stdio.h>
 
-
 /* check for conflicts of a type info */
 void
 type_check_conflicts(struct type_info type, struct err_location *err_loc)
@@ -43,12 +42,12 @@ type_check_conflicts(struct type_info type, struct err_location *err_loc)
 /* this may ofcourse change dependent on architecture */
 static uint32_t type_prim_width[_TYPE_PRIM_COUNT] =
 {
-	[TYPE_PRIM_NONE]			= 0,
-	[TYPE_PRIM_VOID]			= 0,
-	[TYPE_PRIM_CHAR]			= 1,
-	[TYPE_PRIM_INT]				= 4,
-	[TYPE_PRIM_FLOAT]			= 4,
-	[TYPE_PRIM_DOUBLE]			= 8
+	[TYPE_PRIM_NONE]				= 0,
+	[TYPE_PRIM_VOID]				= 0,
+	[TYPE_PRIM_CHAR]				= 1,
+	[TYPE_PRIM_INT]					= 4,
+	[TYPE_PRIM_FLOAT]				= 4,
+	[TYPE_PRIM_DOUBLE]				= 8
 };
 
 size_t
@@ -106,7 +105,7 @@ struct type_info
 type_deduct_from_literal(union type_literal_value lit,
 						 enum type_literal_type lit_type)
 {
-	struct type_info type;
+	struct type_info type = NULL_TYPE_INFO;
 
 	type.indirection = 0;
 	type.spec = 0;
@@ -125,9 +124,8 @@ type_deduct_from_literal(union type_literal_value lit,
 			type.spec &= TYPE_SPEC_LONG;
 		}
 
-		/* should always be unsigned since we make it signed by using
-		 * a uneary minus, and we will check overflow later */
-		type.spec &= TYPE_SPEC_UNSIGNED;
+		/* it should always be signed, unless there is a "u" suffix */
+		type.spec &= TYPE_SPEC_SIGNED;
 		
 	} else if (lit_type == TYPE_LIT_FLOAT) {
 	
@@ -141,6 +139,18 @@ type_deduct_from_literal(union type_literal_value lit,
 	}
 
 	return type;
+}
+
+/* should already be checked that the suffix and literal are compat, 
+ * we just change the type of the literal so it matches the suffix */
+struct type_info
+type_combine_suffix_and_lit(struct type_info suffix, struct type_info literal)
+{
+	if (suffix.spec == TYPE_SPEC_UNSIGNED) {
+		literal.spec &= TYPE_SPEC_UNSIGNED;	
+	}
+
+	return literal;
 }
 
 static const char* type_prim_str[] =

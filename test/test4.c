@@ -15,7 +15,7 @@
 */
 
 {
-	float i = 1 + 2 * 4;
+	unsigned int i = -1;
 	float s = 2;
 	float l = s = 1;
 	float ***** j;

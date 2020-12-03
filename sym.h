@@ -8,7 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* returned if no */
+/* returned if no symbol is found */
 #define SYM_NOT_FOUND -1
 
 enum sym_kind

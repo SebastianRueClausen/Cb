@@ -275,25 +275,58 @@ char_len(const struct lex_instance *in)
 	return 0;
 }
 
+#define MAX_SUFFIX_LEN 2
+
 static struct type_info
-pare_suffix(struct lex_instance *lex_in)
+parse_suffix(struct lex_instance *lex_in, uint32_t len)
 {
+	struct type_info type = NULL_TYPE_INFO;
+
+	if (len > MAX_SUFFIX_LEN) {
+		syntax_error(err_loc(lex_in), "invalid suffix");
+	}
+
 	switch (tolower(*lex_in->curr)) {
 		case 'u':
-			if (tolower(lex_in->curr[1]) == 'l') {
-							
+			type.prim = TYPE_PRIM_INT;						
+			type.spec &= TYPE_SPEC_UNSIGNED;
+
+			if (len == 2) {
+				if (tolower(lex_in->curr[1]) == 'l') {
+					type.spec &= TYPE_SPEC_LONG;
+				} else {
+					syntax_error(err_loc(lex_in), "invalid suffix");
+				}
 			}
 			break;
 
 		case 'l':
-		case 'L':
+			type.prim = TYPE_PRIM_INT;
+			type.spec &= TYPE_SPEC_LONG;
+
+			if (len == 2) {
+				if (tolower(lex_in->curr[1]) == 'u') {
+					type.spec &= TYPE_SPEC_UNSIGNED;
+				} else {
+					syntax_error(err_loc(lex_in), "invalid suffix");
+				}
+			}
 			break;
 
 		case 'f':
-		case 'F':
+			type.prim = TYPE_PRIM_DOUBLE;
+
+			if (len == 2) {
+				syntax_error(err_loc(lex_in), "invalid suffix");
+			}
 			break;
 
+		default:
+			syntax_error(err_loc(lex_in), "invalid suffix");
+			break;
 	}
+
+	return type;
 }
 
 static enum type_literal_type
@@ -803,6 +836,7 @@ lex_next_token(struct lex_instance *in)
 	char c;
 	uint32_t token_len;
 	enum type_literal_type lit_type;
+	struct type_info suffix_type;
 
 	c = skip_whitespace_and_comments(in);
 
@@ -821,15 +855,29 @@ lex_next_token(struct lex_instance *in)
 
 		lit_type = parse_decimal_constant(in->curr, token_len,
 			&in->next_token.literal.value.val_int);
-
+		
 		/* set type */
 		in->next_token.literal.type = type_deduct_from_literal(
 			in->next_token.literal.value,
 			lit_type
 		);
 
-
+		/* skip the number */
 		skip(in, token_len);
+
+		/* parse suffix */				
+		token_len = word_len(in);
+
+		if (token_len) {
+			suffix_type = parse_suffix(in, token_len);
+
+			/* TODO this should be some kind of error checking */
+			assert(type_compat(suffix_type, in->next_token.literal.type) != TYPE_COMPAT_INCOMPAT);
+
+			in->next_token.literal.type = type_combine_suffix_and_lit(suffix_type, in->next_token.literal.type);
+
+			skip(in, token_len);
+		}
 		
 	} else if (c == '"') {
 		/* TODO add parsing for strings, and remember deducting the type */
@@ -849,15 +897,15 @@ lex_next_token(struct lex_instance *in)
 
 		/* get value */
 		in->next_token.literal.value.val_int = parse_char_literal(in, token_len);
+
 		/* set type */
 		in->next_token.literal.type = type_deduct_from_literal(
 				in->next_token.literal.value,
 				TYPE_LIT_INT
 		);
-		
-
 
 		skip(in, token_len + 1);
+
 	} else {
 		in->next_token.type = lookup_symbol(in->curr, &token_len);
 		skip(in, token_len);

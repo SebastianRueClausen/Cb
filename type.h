@@ -11,7 +11,6 @@
 #define TYPE_UINT_MAX		4294967295
 #define TYPE_ULONG_MAX		18446744073709551615
 
-
 enum type_spec
 {
 	TYPE_SPEC_CONST				= 1 << 0,
@@ -52,6 +51,13 @@ struct type_info
 	uint32_t					indirection;
 };
 
+static const struct type_info NULL_TYPE_INFO =
+{
+	.prim						= TYPE_PRIM_NONE,
+	.spec						= 0,
+	.indirection				= 0
+};
+
 enum type_literal_type
 {
 	TYPE_LIT_INT,
@@ -78,6 +84,9 @@ type_get_width(const struct type_info type);
 
 enum type_compat
 type_compat(struct type_info left, struct type_info right);
+
+struct type_info
+type_combine_suffix_and_lit(struct type_info suffix, struct type_info literal);
 
 void
 type_print(const struct type_info type);
