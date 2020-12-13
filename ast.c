@@ -115,8 +115,9 @@ is_rvalue(enum lex_token_type tok)
 
 /* allocate and create ast node */
 static struct ast_node*
-make_ast_node(struct ast_instance *ast_in, enum ast_type type, struct ast_node *left,
-			  struct ast_node *center, struct ast_node *right)
+make_ast_node(struct ast_instance *ast_in, enum ast_type type,
+			  struct ast_node *left, struct ast_node *center,
+			  struct ast_node *right)
 {
 	struct ast_node *node;
 
@@ -129,7 +130,6 @@ make_ast_node(struct ast_instance *ast_in, enum ast_type type, struct ast_node *
 	return node;
 }
 
-/* determine the datatype and create a node*/
 static struct ast_node*
 make_rvalue_node(struct ast_instance *ast_in, const struct lex_token *token)
 {
@@ -138,6 +138,7 @@ make_rvalue_node(struct ast_instance *ast_in, const struct lex_token *token)
 	switch (token->type) {
 		case TOK_LITERAL:
 			node = make_ast_node(ast_in, AST_LITERAL, NULL, NULL, NULL);
+			node->literal.type = token->literal.type;
 			node->literal.value = token->literal.value;
 			break;
 
@@ -160,6 +161,7 @@ make_lvalue_node(struct ast_instance *ast_in, const struct lex_token *token)
 
 	id = sym_find_id(ast_in->sym_table, token->hash);
 
+	/* sym will always be defined before we use it here */
 	if (id == SYM_NOT_FOUND) {
 		syntax_error(token->err_loc, "use of undeclared identifier");
 	}
@@ -177,7 +179,11 @@ parse_prefix(struct ast_instance *ast_in)
 	struct ast_node *node = NULL;
 
 	switch (ast_in->lex_in->curr_token.type) {
+
+		/* unary plus */
 		case TOK_PLUS:
+
+			/* skip '+' */
 			lex_next_token(ast_in->lex_in);
 
 			if (ast_in->lex_in->curr_token.type == TOK_IDENTIFIER) {
@@ -190,8 +196,12 @@ parse_prefix(struct ast_instance *ast_in)
 			}
 
 			return make_ast_node(ast_in, AST_UNARY_PLUS, node, NULL, NULL);
-			
+	
+
+		/* unary minus */
 		case TOK_MINUS:
+
+			/* skip '-' */
 			lex_next_token(ast_in->lex_in);
 
 			if (ast_in->lex_in->curr_token.type == TOK_IDENTIFIER) {
@@ -205,33 +215,49 @@ parse_prefix(struct ast_instance *ast_in)
 
 			return make_ast_node(ast_in, AST_UNARY_MINUS, node, NULL, NULL);
 
+
+		/* pre increment */
 		case TOK_INCREASE:
+
+			/* skip '++' */
 			lex_next_token(ast_in->lex_in);
 
 			if (ast_in->lex_in->curr_token.type == TOK_IDENTIFIER) {
 				node = make_lvalue_node(ast_in, &ast_in->lex_in->curr_token);
-			} else if (is_rvalue(ast_in->lex_in->curr_token.type)) {
-				syntax_error(ast_in->lex_in->last_token.err_loc, "r-value is not assignable");
+			}
+			/* must be and lvalue */
+			else if (is_rvalue(ast_in->lex_in->curr_token.type)) {
+				syntax_error(ast_in->lex_in->last_token.err_loc,
+						"r-value is not assignable");
 			} else {
 				syntax_error(ast_in->lex_in->last_token.err_loc, "prefix error");
 			}
 
 			return make_ast_node(ast_in, AST_PRE_INCREMENT, node, NULL, NULL);
 
+
+		/* pre decrement */
 		case TOK_DECREASE:
+
+			/* skip '--' */
 			lex_next_token(ast_in->lex_in);
 
 			if (ast_in->lex_in->curr_token.type == TOK_IDENTIFIER) {
 				node = make_lvalue_node(ast_in, &ast_in->lex_in->curr_token);
 			} else if (is_rvalue(ast_in->lex_in->curr_token.type)) {
-				syntax_error(ast_in->lex_in->last_token.err_loc, "r-value is not assignable");
+				syntax_error(ast_in->lex_in->last_token.err_loc,
+						"r-value is not assignable");
 			} else {
 				syntax_error(ast_in->lex_in->last_token.err_loc, "prefix error");
 			}
 			
 			return make_ast_node(ast_in, AST_PRE_DECREMENT, node, NULL, NULL);
 
+
+		/* address of */
 		case TOK_AMPERSAND:
+
+			/* skip '~' */
 			lex_next_token(ast_in->lex_in);
 
 			if (ast_in->lex_in->curr_token.type == TOK_IDENTIFIER) {
@@ -246,7 +272,10 @@ parse_prefix(struct ast_instance *ast_in)
 
 			return make_ast_node(ast_in, AST_ADDRESS, node, NULL, NULL);
 
+		/* derefrence */
 		case TOK_STAR:
+
+			/* skip '*' */
 			lex_next_token(ast_in->lex_in);
 
 			if (ast_in->lex_in->curr_token.type == TOK_IDENTIFIER) {
@@ -262,6 +291,7 @@ parse_prefix(struct ast_instance *ast_in)
 			return make_ast_node(ast_in, AST_DEREF, node, NULL, NULL);
 
 		default:
+			/* returns NULL if the prefix is invalid */
 			return NULL;
 	}
 }
@@ -312,13 +342,14 @@ parse_expression(struct ast_instance *ast_in, int32_t prev_prec,
 	enum ast_type node_type;
 
 	/* get value token */
-	token = lex_next_token(ast_in->lex_in);
+	token = ast_in->lex_in->curr_token;
 
 	if (token.type == TOK_IDENTIFIER) {
 		left = make_lvalue_node(ast_in, &token);
 	} else if (is_rvalue(token.type)) {
 		left = make_rvalue_node(ast_in, &token);
 	} else if (token.type == TOK_PAREN_OPEN) {
+		lex_next_token(ast_in->lex_in);
 		left = parse_expression(ast_in, 0, TOK_PAREN_CLOSED);
 	} else {
 		/* the only other valid option is a prefix */
@@ -348,6 +379,7 @@ parse_expression(struct ast_instance *ast_in, int32_t prev_prec,
 		   (is_right_associavity(node_type) &&
 		   prev_prec == ast_precedence[node_type])) {
 
+		lex_next_token(ast_in->lex_in);
 		right = parse_expression(ast_in, ast_precedence[node_type], terminator);
 
 		/* we must handle assignment differently */
@@ -381,6 +413,8 @@ parse_expression(struct ast_instance *ast_in, int32_t prev_prec,
 		}
 	}
 
+	printf("exited expression with current token %s\n",
+			lex_tok_debug_str(ast_in->lex_in->curr_token.type));
 	return left;
 }
 
@@ -397,6 +431,9 @@ tok_err_str(enum lex_token_type type)
 
 		case TOK_PAREN_CLOSED:
 			return ")";
+
+		case TOK_IDENTIFIER:
+			return "identifier";
 
 		default:
 			return "internal error";
@@ -416,9 +453,9 @@ assert_token(struct ast_instance *ast_in, enum lex_token_type type)
 inline static void
 parse_token(struct ast_instance *ast_in, enum lex_token_type type)
 {
-	lex_next_token(ast_in->lex_in);
-
 	assert_token(ast_in, type);
+
+	lex_next_token(ast_in->lex_in);
 }
 
 static struct ast_node*
@@ -576,50 +613,75 @@ parse_declaration(struct ast_instance *ast_in, struct sym_table *table)
 		tok_type = lex_next_token(ast_in->lex_in).type;
 	}
 
-	/* the next token after specifiers must be an identifier */
-	if (ast_in->lex_in->curr_token.type != TOK_IDENTIFIER) {
-		syntax_error(ast_in->lex_in->curr_token.err_loc,
-				"variabel must have a name");
-	}
+	/* check for conflicts */
+	type_check_conflicts(sym_entry.type, &ast_in->lex_in->curr_token.err_loc);	
 
+	/* the next token after specifiers must be an identifier */
+	parse_token(ast_in, TOK_IDENTIFIER);
+
+	/* get sym id */
 	sym_hash = ast_in->lex_in->curr_token.hash;
 	id = sym_find_id(table, sym_hash);
 
-	if (id == SYM_NOT_FOUND) {
-		id = sym_add_entry(table, sym_entry, sym_hash);
-	} else {
-		syntax_error(ast_in->lex_in->curr_token.err_loc, "redefinition of variabel");
+	/* make sure variable isnt declared already */
+	if (id != SYM_NOT_FOUND) {
+		syntax_error(ast_in->lex_in->curr_token.err_loc,
+				"redefinition of variabel");
 	}
 
-	type_check_conflicts(sym_entry.type, &ast_in->lex_in->curr_token.err_loc);	
+	/* add to symbol table */
+	id = sym_add_entry(table, sym_entry, sym_hash);
 
-	/* inline assignment */
-	/* TODO should also check for assignment list */
-	if (ast_in->lex_in->next_token.type == TOK_ASSIGN) {
-		lex_next_token(ast_in->lex_in);	
 
-		sym_get_entry(ast_in->sym_table, id)->kind = SYM_KIND_VARIABLE;	
+	/* check for inline assignment an such */
+	switch (ast_in->lex_in->curr_token.type) {
 
-		right = make_ast_node(ast_in, AST_IDENTIFIER, NULL, NULL, NULL);
-		left = parse_expression(ast_in, 0, TOK_SEMIKOLON);
-		left = make_ast_node(ast_in, AST_ASSIGN, left, NULL, right);
+		/* inline assignment */
+		case TOK_ASSIGN:
 
-		if (ast_in->lex_in->curr_token.type != TOK_SEMIKOLON) {
-			syntax_error(ast_in->lex_in->curr_token.err_loc, "expected semikolon");
-		}
+			/* skip '=' */
+			lex_next_token(ast_in->lex_in);
 
-		return left;
+			/* since we assign it a value it must be a varable */
+			sym_get_entry(ast_in->sym_table, id)->kind = SYM_KIND_VARIABLE;	
 
-	} else if (ast_in->lex_in->next_token.type == TOK_PAREN_OPEN) {
-		sym_get_entry(ast_in->sym_table, id)->kind = SYM_KIND_FUNCTION;	
-		return parse_function_declaration(ast_in, id);
-	} else if (ast_in->lex_in->next_token.type == TOK_SEMIKOLON) {
-		lex_next_token(ast_in->lex_in);
-		sym_get_entry(ast_in->sym_table, id)->kind = SYM_KIND_VARIABLE;	
-		return NULL;
-	} else {
-		syntax_error(ast_in->lex_in->curr_token.err_loc, "expected semikolon");
-		return NULL;
+			/* make an identifier ast node */
+			right = make_ast_node(ast_in, AST_IDENTIFIER, NULL, NULL, NULL);
+
+			/* parse the expression */
+			left = parse_expression(ast_in, 0, TOK_SEMIKOLON);
+
+			/* skip semikolon */
+			lex_next_token(ast_in->lex_in);
+
+			/* glue together expression */
+			left = make_ast_node(ast_in, AST_ASSIGN, left, NULL, right);
+
+			return left;
+
+
+		/* function */
+		case TOK_PAREN_OPEN:
+			
+			/* symbol must be a function */
+			sym_get_entry(ast_in->sym_table, id)->kind = SYM_KIND_FUNCTION;	
+
+			left = parse_function_declaration(ast_in, id);	
+
+			return left;
+
+
+		/* undeclared  */	
+		default:
+
+			/* skip semikolon */
+			parse_token(ast_in, TOK_SEMIKOLON);	
+			
+			/* must be a variable */
+			sym_get_entry(ast_in->sym_table, id)->kind = SYM_KIND_VARIABLE;	
+			
+			/* we return NULL since this doesnt produce any code */
+			return NULL;
 	}
 }
 
@@ -635,19 +697,22 @@ parse_if_statement(struct ast_instance *ast_in)
 {
 	struct ast_node *condition_ast, *true_ast, *false_ast;
 
-	assert(ast_in->lex_in->curr_token.type == TOK_KEY_IF);	
-
+	/* skip 'if' token */
 	lex_next_token(ast_in->lex_in);
-	assert(ast_in->lex_in->curr_token.type == TOK_PAREN_OPEN);
 
+	/* skip opening '(' */
+	parse_token(ast_in, TOK_PAREN_OPEN);
+
+	/* parse conditional expression */
 	condition_ast = parse_expression(ast_in, 0, TOK_PAREN_CLOSED);
 
+	/* skip closing ')' */
 	lex_next_token(ast_in->lex_in);
 
+	/* parse the body */
 	true_ast = parse_statement(ast_in);
-	lex_next_token(ast_in->lex_in);
-	
-	if (ast_in->lex_in->next_token.type == TOK_KEY_ELSE) {
+
+	if (ast_in->lex_in->curr_token.type == TOK_KEY_ELSE) {
 		lex_next_token(ast_in->lex_in);
 		false_ast = parse_else_statement(ast_in);
 	}
@@ -663,11 +728,16 @@ parse_while_loop(struct ast_instance *ast_in)
 {
 	struct ast_node *condition_ast, *body_ast;
 
+	/* skip 'while' token */	
+	lex_next_token(ast_in->lex_in);
+
 	/* skip the '(' */
 	parse_token(ast_in, TOK_PAREN_OPEN);
 
 	/* parse the conditional */
 	condition_ast = parse_expression(ast_in, 0, TOK_PAREN_CLOSED);
+
+	/* skip closing ')' */
 	lex_next_token(ast_in->lex_in);
 
 	/* parse the body */
@@ -683,17 +753,23 @@ parse_for_loop(struct ast_instance *ast_in)
 {
 	struct ast_node *tree, *body, *cond, *pre_op, *post_op;
 
+	/* skip opening 'for' token */
+	lex_next_token(ast_in->lex_in);
+
 	/* skip the '(' */
 	parse_token(ast_in, TOK_PAREN_OPEN);
 
 	/* parse preop expression */
 	pre_op = parse_expression(ast_in, 0, TOK_SEMIKOLON);
+	lex_next_token(ast_in->lex_in);
 
 	/* parse conditional statement */
 	cond = parse_expression(ast_in, 0, TOK_SEMIKOLON);
+	lex_next_token(ast_in->lex_in);
 
 	/* parse post op */	
 	post_op = parse_expression(ast_in, 0, TOK_PAREN_CLOSED);
+	lex_next_token(ast_in->lex_in);
 
 	/* parse statement */
 	body = parse_statement(ast_in);
@@ -711,6 +787,7 @@ parse_for_loop(struct ast_instance *ast_in)
 }
 
 /* creates an ast tree from a single statement, which can include compound statements */
+/* expect the current token to be the first of the statement */
 struct ast_node*
 parse_statement(struct ast_instance *ast_in)
 {
@@ -729,16 +806,10 @@ parse_statement(struct ast_instance *ast_in)
 
 		case TOK_KEY_ELSE:
 			syntax_error(token.err_loc, "no maching if statement");
-			tree = NULL;
-			break;
+			return NULL;
 
 		case TOK_BRACE_OPEN:
 			return parse_compound_statement(ast_in);
-
-		case TOK_IDENTIFIER:
-		case TOK_INCREASE:
-			tree = parse_expression(ast_in, 0, TOK_SEMIKOLON);
-			break;
 
 		case TOK_KEY_INT:	
 		case TOK_KEY_SHORT:
@@ -752,23 +823,16 @@ parse_statement(struct ast_instance *ast_in)
 		case TOK_KEY_CONST:
 		case TOK_KEY_LONG:
 		case TOK_KEY_EXTERN:
-			tree = parse_declaration(ast_in, ast_in->sym_table);
-			break;
+			return parse_declaration(ast_in, ast_in->sym_table);
 
 		default:
-			syntax_error(token.err_loc, "internal : parse_statement : %s",
-					lex_tok_debug_str(token.type));
-			assert(false);
-			break;
-	}
+			tree = parse_expression(ast_in, 0, TOK_SEMIKOLON);
 
-	if (ast_in->lex_in->curr_token.type != TOK_SEMIKOLON) {
-		syntax_error(ast_in->lex_in->curr_token.err_loc, "expected semikolon");
-	} else {
-		lex_next_token(ast_in->lex_in);
-	}
+			/* skip semikolon */
+			lex_next_token(ast_in->lex_in);
 
-	return tree;
+			return tree;
+	}
 }
 
 /* loops through all statements in a compound statement and creates an ast tree */

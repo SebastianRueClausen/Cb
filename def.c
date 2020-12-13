@@ -84,8 +84,6 @@ create_block(size_t block_size)
 	block->start = (char*)block + sizeof(struct mem_block);
 	block->top = block->start;
 
-	printf("new block\n");
-	
 	return block;
 }
 
@@ -144,8 +142,9 @@ c_malloc(size_t size)
 {
 	void *ptr = malloc(size);
 
-	if (!ptr)
+	if (!ptr) {
 		fatal_error("out of memory");
+	}
 
 	return ptr;
 }
@@ -156,8 +155,9 @@ c_realloc(void *ptr, size_t size)
 {
 	ptr = realloc(ptr, size);
 
-	if (!ptr)
+	if (!ptr) {
 		fatal_error("realloc failed");
+	}
 
 	return ptr;
 }

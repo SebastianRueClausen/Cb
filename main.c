@@ -121,12 +121,13 @@ int main()
 	struct sym_table table;
 
 	lex_in = lex_create_instance("../test/test4.c");
-	ast_in = ast_create_instance(&lex_in, &table);
 	sym_create_table(&table, 10);
+	ast_in = ast_create_instance(&lex_in, &table);
+
 	lex_next_token(&lex_in);
 
 	ast_in.tree = parse_statement(&ast_in);
-	ast_print_tree_postorder(ast_in.tree);
+	ast_print_tree(ast_in.tree, 0);
 
 	//ssa_test(ast_in.tree);
 
