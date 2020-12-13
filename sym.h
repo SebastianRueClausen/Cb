@@ -29,14 +29,14 @@ struct sym_entry
 {
 	struct type_info		type;
 	enum sym_kind			kind;
-	int64_t					hash;
 };
 
 struct sym_table
 {
 	struct sym_entry		*entries;
-	uint32_t				entry_count;
-	uint32_t				entry_allocated;
+	int64_t					*hashes;
+	uint32_t				count;
+	uint32_t				allocated;
 };
 
 int64_t
@@ -46,7 +46,7 @@ void
 sym_create_table(struct sym_table *table, uint32_t count);
 
 uint32_t
-sym_add_entry(struct sym_table *table, struct sym_entry entry);
+sym_add_entry(struct sym_table *table, struct sym_entry entry, int64_t hash);
 
 void
 sym_destroy_table(struct sym_table *table);

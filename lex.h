@@ -147,7 +147,7 @@ struct err_location
 err_loc(const struct lex_instance* fb);
 
 const char*
-lex_tok_str(enum lex_token_type type);
+lex_tok_debug_str(enum lex_token_type type);
 
 struct lex_instance
 lex_create_instance(const char* filename);

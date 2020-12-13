@@ -12,7 +12,7 @@
  * parses the raw text into tokens
  */
 
-static const char *tok_str[_TOK_COUNT] = {
+static const char *tok_debug_str[_TOK_COUNT] = {
 	"TOK_UNKNOWN",
 	"TOK_LIT",
 	"TOK_PLUS",
@@ -98,11 +98,112 @@ static const char *tok_str[_TOK_COUNT] = {
 };
 
 const char*
+lex_tok_debug_str(enum lex_token_type type)
+{
+	return tok_debug_str[type];
+}
+
+
+/* could be used for error messages, but for now we just have a smaller list
+ * in ast.c */
+/* could perhaps be used to simplify parts of the parser??? */
+
+#if 0
+static const char *tok_str[_TOK_COUNT] = {
+	"__???__",
+	"1.123",
+	"+",
+	"-",
+	"*",
+	"/",
+	"%",
+	"+=",
+	"-=",
+	"*=",
+	"/=",
+	"%=",
+	"++",
+	"--",
+	"=",
+	">",
+	"<",
+	">=",
+	"<=",
+	"==",
+	"!=",
+	"!",
+	"&&",
+	"||",
+	"&",
+	"~",
+	"|",
+	"^",
+	"<<",
+	">>",
+	"&=",
+	"~=",
+	"|=",
+	"^=",
+	"<<=",
+	">>=",
+	"(",
+	")",
+	"[",
+	"]",
+	"{",
+	"}",
+	".",
+	"->",
+	";",
+	":",
+	",",
+	"...",
+	"?",
+	"if",
+	"else",
+	"while",
+	"do",
+	"for",
+	"switch",
+	"case",
+	"break",
+	"default",
+	"continue",
+	"return",
+	"goto",
+	"int",
+	"float",
+	"char",
+	"double",
+	"long",
+	"short",
+	"void",
+	"const",
+	"volatile",
+	"register",
+	"signed",
+	"unsigned",
+	"struct",
+	"enum",
+	"union",
+	"extern",
+	"static",
+	"sizeof",
+	"typedef",
+	"xxxxx",
+	"EOF"
+};
+
+const char*
 lex_tok_str(enum lex_token_type type)
 {
 	return tok_str[type];
 }
 
+#endif
+
+/* moves the curr pointer by 1, and returns the char
+ * also updates the position */
 static char
 next(struct lex_instance *in)
 {

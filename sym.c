@@ -21,35 +21,45 @@ sym_hash(const char *key, uint32_t len)
 void
 sym_create_table(struct sym_table *table, uint32_t count)
 {
-	table->entry_allocated = count;
+	table->allocated = count;
 	table->entries = c_malloc(sizeof(struct sym_entry) * count);
-	table->entry_count = 0;
+	table->hashes = c_malloc(sizeof(int64_t) * count);
+	table->count = 0;
 }
 
 /* checks that there is a enough space allocated for a new entry, if not
  * it doubles the size of the table */
 uint32_t
-sym_add_entry(struct sym_table *table, struct sym_entry entry)
+sym_add_entry(struct sym_table *table, struct sym_entry entry, int64_t hash)
 {
-	if (table->entry_allocated == table->entry_count) {
-		/* We double the size for now */
-		table->entry_allocated *= 2;
+	if (table->allocated == table->count) {
+
+		/* we double the size for now */
+		table->allocated *= 2;
+
+		/* We double the size for entries */
 		table->entries = c_realloc(table->entries, sizeof(struct sym_entry) *
-													   table->entry_allocated);
+													   table->allocated);
+		/* double size for hashes */
+		table->hashes = c_realloc(table->entries, sizeof(int64_t) *
+														table->allocated);
 	}
 
-	table->entries[table->entry_count] = entry;
+	table->entries[table->count] = entry;
+	table->hashes[table->count] = hash;
 	
-	return table->entry_count++;
+	return table->count++;
 }
 
 /* free the symbol table */
 void
 sym_destroy_table(struct sym_table *table)
 {
-	table->entry_allocated = 0;
-	table->entry_count = 0;
+	table->allocated = 0;
+	table->count = 0;
+
 	c_free(table->entries);
+	c_free(table->hashes);
 }
 
 
@@ -61,8 +71,8 @@ sym_find_id(const struct sym_table *table, int64_t hash)
 
 	// @performance: should we loop through the table in reverse?,
 	// since you often reference newly created variables 
-	for (i = 0; (uint32_t)i < table->entry_count; ++i) {
-		if (table->entries[i].hash == hash) {
+	for (i = 0; (uint32_t)i < table->count; ++i) {
+		if (table->hashes[i] == hash) {
 			return i;
 		}
 	}
@@ -75,7 +85,7 @@ struct sym_entry*
 sym_get_entry(const struct sym_table *table, uint32_t id)
 {
 	// @note should this return NULL?
-	if (id > table->entry_count) {
+	if (id > table->count) {
 		fatal_error("[Internal]: failed lookup for sym_entry");
 	}
 	
@@ -88,12 +98,12 @@ sym_print(const struct sym_entry *entry)
 	uint32_t i;
 
 	printf("entry: \n");
-	printf("\thash: %li\n", entry->hash);
 	// printf("\ttype: %s\n", sym_prim_str[entry->prim]);
 	printf("\tindirection: %u\n", entry->type.indirection);
 
 	for (i = 0; i < 9; ++i) {
-		// printf("\t%s: %s\n", sym_spec_str[i], (entry->spec & (1<< i) ? "X" : "0"));
+		// TODO make this work again
+		// printf("\t%s: %s\n", [i], (entry->spec & (1<< i) ? "X" : "0"));
 	}
 
 }

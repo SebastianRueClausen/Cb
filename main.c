@@ -21,9 +21,9 @@ run_test1()
 		token = lex_next_token(&lex_in);
 
 		if ((uint32_t)token.type == i) {
-			printf("Success : %s\n", lex_tok_str(i));
+			printf("Success : %s\n", lex_tok_debug_str(i));
 		} else {
-			printf("Failure : %s : %s\n", lex_tok_str(i), lex_tok_str(token.type));
+			printf("Failure : %s : %s\n", lex_tok_debug_str(i), lex_tok_debug_str(token.type));
 		}
 	}
 
@@ -74,10 +74,10 @@ run_test2()
 
 		if (expected_tokens[i] != token.type) {
 			printf("Failure : %s, i = %i : should have gotten : %s\n",
-					lex_tok_str(token.type),
-					i, lex_tok_str(expected_tokens[i]));
+					lex_tok_debug_str(token.type),
+					i, lex_tok_debug_str(expected_tokens[i]));
 		} else {
-			printf("Success : %s, i = %i\n", lex_tok_str(token.type), i);
+			printf("Success : %s, i = %i\n", lex_tok_debug_str(token.type), i);
 		}
 	}
 

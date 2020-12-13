@@ -15,8 +15,16 @@
 */
 
 {
-	unsigned int i = -1;
-	float s = 2;
-	float l = s = 1;
-	float ***** j;
+	int i;
+	int b;
+
+	while (i < 10) {
+		b = i;
+		++i;
+	}
+
+	for (i = 0; i < 2; ++i) {
+		b = i;
+	}
+	
 }
