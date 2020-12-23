@@ -120,7 +120,7 @@ int main()
 	struct ast_instance ast_in;
 	struct sym_table table;
 
-	lex_in = lex_create_instance("../test/test4.c");
+	lex_in = lex_create_instance("../test/test5.c");
 	sym_create_table(&table, 10);
 	ast_in = ast_create_instance(&lex_in, &table);
 

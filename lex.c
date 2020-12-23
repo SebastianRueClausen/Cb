@@ -389,8 +389,7 @@ parse_suffix(struct lex_instance *lex_in, uint32_t len)
 
 	switch (tolower(*lex_in->curr)) {
 		case 'u':
-			type.prim = TYPE_PRIM_INT;						
-			type.spec &= TYPE_SPEC_UNSIGNED;
+			type.spec |= TYPE_SPEC_UNSIGNED;
 
 			if (len == 2) {
 				if (tolower(lex_in->curr[1]) == 'l') {
@@ -402,8 +401,7 @@ parse_suffix(struct lex_instance *lex_in, uint32_t len)
 			break;
 
 		case 'l':
-			type.prim = TYPE_PRIM_INT;
-			type.spec &= TYPE_SPEC_LONG;
+			type.spec |= TYPE_SPEC_LONG;
 
 			if (len == 2) {
 				if (tolower(lex_in->curr[1]) == 'u') {
@@ -457,7 +455,7 @@ parse_decimal_constant(const char *str, uint32_t len, uint64_t *val)
 	}
 
 	*((double *)val) = d_tmp;
-	return TYPE_LIT_INT;
+	return TYPE_LIT_FLOAT;
 }
 
 static enum type_literal_type
@@ -972,10 +970,8 @@ lex_next_token(struct lex_instance *in)
 		if (token_len) {
 			suffix_type = parse_suffix(in, token_len);
 
-			/* TODO this should be some kind of error checking */
-			assert(type_compat(suffix_type, in->next_token.literal.type) != TYPE_COMPAT_INCOMPAT);
-
-			in->next_token.literal.type = type_combine_suffix_and_lit(suffix_type, in->next_token.literal.type);
+			in->next_token.literal.type = type_adapt_to_suffix(suffix_type,
+					in->next_token.literal.type, err_loc(in));
 
 			skip(in, token_len);
 		}
@@ -999,11 +995,10 @@ lex_next_token(struct lex_instance *in)
 		/* get value */
 		in->next_token.literal.value.val_int = parse_char_literal(in, token_len);
 
-		/* set type */
-		in->next_token.literal.type = type_deduct_from_literal(
-				in->next_token.literal.value,
-				TYPE_LIT_INT
-		);
+		/* @note: store as uint32 for now, however should perhaps
+		 * store as uint8 */
+		in->next_token.literal.type.prim = TYPE_PRIM_INT;
+		in->next_token.literal.type.prim &= TYPE_SPEC_UNSIGNED;
 
 		skip(in, token_len + 1);
 

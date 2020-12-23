@@ -39,8 +39,8 @@ enum type_compat
 {
 	TYPE_COMPAT_INCOMPAT,
 	TYPE_COMPAT_COMPAT,
-	TYPE_COMPAT_WIDEN_LEFT,
-	TYPE_COMPAT_WIDEN_RIGHT
+	TYPE_COMPAT_PROMOTE_LEFT,
+	TYPE_COMPAT_PROMOTE_RIGHT
 };
 
 
@@ -86,7 +86,8 @@ enum type_compat
 type_compat(struct type_info left, struct type_info right);
 
 struct type_info
-type_combine_suffix_and_lit(struct type_info suffix, struct type_info literal);
+type_adapt_to_suffix(struct type_info suffix, struct type_info literal,
+					 struct err_location err_loc);
 
 void
 type_print(const struct type_info type);

@@ -1,6 +1,8 @@
 #include "type.h"
 
+#include <stdbool.h>
 #include <stdio.h>
+#include <assert.h>
 
 /* check for conflicts of a type info */
 void
@@ -29,6 +31,7 @@ type_check_conflicts(struct type_info type, struct err_location *err_loc)
 			}
 			break;
 
+		/* applies to all other types */
 		default:
 			if (type.spec & TYPE_SPEC_SIGNED && type.spec & TYPE_SPEC_UNSIGNED) {
 				syntax_error(*err_loc, "type can not be specified as signed and unsigned");
@@ -53,6 +56,10 @@ static uint32_t type_prim_width[_TYPE_PRIM_COUNT] =
 size_t
 type_get_width(const struct type_info type)
 {
+	if (type.indirection != 0) {
+		return 8;
+	}
+
 	/* since we check that type specifiers doesnt conflict
 	 * we should just be able to check if its short or long */
 	if (type.spec & TYPE_SPEC_SHORT) {
@@ -66,7 +73,7 @@ type_get_width(const struct type_info type)
 	return type_prim_width[type.prim];
 }
 
-/* check the compatebillity of two types */
+/* check the compat of two types */
 enum type_compat
 type_compat(struct type_info left, struct type_info right)
 {
@@ -91,11 +98,11 @@ type_compat(struct type_info left, struct type_info right)
 
 	/* @TODO we should check how much we should widen with */
 	if (left_width > right_width) {
-		return TYPE_COMPAT_WIDEN_RIGHT;
+		return TYPE_COMPAT_PROMOTE_RIGHT;
 	}
 
 	if (left_width < right_width) {
-		return TYPE_COMPAT_WIDEN_LEFT;
+		return TYPE_COMPAT_PROMOTE_LEFT;
 	}
 
 	return TYPE_COMPAT_COMPAT;
@@ -110,56 +117,92 @@ type_deduct_from_literal(union type_literal_value lit,
 	type.indirection = 0;
 	type.spec = 0;
 
-	if (lit_type == TYPE_LIT_INT) {
-		/* we make it the smallest possible literal */
-		if (lit.val_int <= TYPE_UCHAR_MAX) {
-			type.prim =	TYPE_PRIM_CHAR;
-		} else if (lit.val_int <= TYPE_USHORT_MAX) {
-			type.prim = TYPE_PRIM_INT;
-			type.spec &= TYPE_SPEC_SHORT;
-		} else if (lit.val_int <= TYPE_UINT_MAX) {
-			type.prim = TYPE_PRIM_INT;
-		} else {
-			type.prim = TYPE_PRIM_INT;
-			type.spec &= TYPE_SPEC_LONG;
-		}
-
-		/* it should always be signed, unless there is a "u" suffix */
-		type.spec &= TYPE_SPEC_SIGNED;
+	switch (lit_type) {
 		
-	} else if (lit_type == TYPE_LIT_FLOAT) {
-	
-		/* @note: how do we decide if it is a double or float */
-		type.prim = TYPE_PRIM_DOUBLE;
-	} else { /* string */
-		type.prim = TYPE_PRIM_CHAR;
-		/* should this be const?? */
-		type.spec = TYPE_SPEC_CONST;
-		type.indirection = 1;
-	}
+		case TYPE_LIT_INT:
+			/* we make it a u32 or u64 dependent on size */
+			type.prim = TYPE_PRIM_INT;
 
-	return type;
+			if (lit.val_int > UINT32_MAX) {
+				type.spec |= TYPE_SPEC_LONG;
+			}
+
+			/* @todo: add check for overflow */
+
+			/* always unsigned since a literal can't have a signed value */
+			type.spec |= TYPE_SPEC_SIGNED;
+			
+			return type;
+
+		case TYPE_LIT_FLOAT:
+
+			/* we always make it a double */
+			type.prim = TYPE_PRIM_DOUBLE;
+			return type;
+
+		case TYPE_LIT_STRING:
+			type.prim = TYPE_PRIM_CHAR;
+			/* should this be const?? */
+			type.spec = TYPE_SPEC_CONST;
+			type.indirection = 1;
+			return type;
+
+	}
 }
 
 /* should already be checked that the suffix and literal are compat, 
  * we just change the type of the literal so it matches the suffix */
 struct type_info
-type_combine_suffix_and_lit(struct type_info suffix, struct type_info literal)
+type_adapt_to_suffix(struct type_info suffix, struct type_info literal,
+					 struct err_location err_loc)
 {
-	if (suffix.spec == TYPE_SPEC_UNSIGNED) {
-		literal.spec &= TYPE_SPEC_UNSIGNED;	
-	}
 
-	return literal;
+	switch (literal.prim) {
+
+		/* we always set a literal as double if it's a floating point */
+		case TYPE_PRIM_DOUBLE:
+
+			if (suffix.spec & TYPE_SPEC_UNSIGNED) {
+				syntax_error(err_loc, "invalid suffix 'unsigned' for "
+									   "floating point literal");
+			}
+
+			if (suffix.spec & TYPE_SPEC_LONG) {
+				syntax_error(err_loc, "invalid suffix 'long' for "
+									    "floating point literal");
+			}
+			
+			return literal;
+
+		case TYPE_PRIM_INT:
+			/* should always be unsigned */
+
+			if (suffix.prim == TYPE_PRIM_DOUBLE) {
+				syntax_error(err_loc, "invalid suffix 'float' for "
+									   "integer literal");
+			}
+
+			if (suffix.spec & TYPE_SPEC_LONG) {
+				literal.spec |= TYPE_SPEC_LONG;
+			}
+
+			return literal;
+
+		default:
+			assert(false);
+		
+	}
 }
 
 static const char* type_prim_str[] =
 {
 	"TYPE_PRIM_NONE",
+	"TYPE_PRIM_VOID",
+	"TYPE_PRIM_CHAR",
 	"TYPE_PRIM_INT",
 	"TYPE_PRIM_FLOAT",
-	"TYPE_PRIM_CHAR",
-	"TYPE_PRIM_DOUBLE"
+	"TYPE_PRIM_DOUBLE",
+	"_TYPE_PRIM_COUNT"
 };
 
 static const char* type_spec_str[] =

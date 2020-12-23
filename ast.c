@@ -25,6 +25,7 @@ static const char* ast_str[] =
 	"AST_MIN",
 	"AST_MUL",
 	"AST_DIV",
+	"AST_MOD",
 
 	"AST_EQUAL",
 	"AST_NOT_EQUAL",
@@ -35,12 +36,20 @@ static const char* ast_str[] =
 
 	"AST_UNARY_PLUS",
 	"AST_UNARY_MINUS",
+	"AST_UNARY_NOT",
+
+	"AST_BIT_NOT",
 
 	"AST_PRE_INCREMENT",
 	"AST_PRE_DECREMENT",
 
+	"AST_POST_INCREMENT",
+	"AST_POST_DECREMENT",
+
 	"AST_DEREF",
 	"AST_ADDRESS",
+
+	"AST_PROMOTE",
 
 	"AST_ASSIGN",
 
@@ -71,6 +80,8 @@ ast_to_str(enum ast_type type)
 #endif
 
 /* operation tokens used in expressions */
+/* @perforamce: make sections lign up with token type for farster,
+ * conversion */
 static enum ast_type
 op_tok_to_ast(enum lex_token_type tok)
 {
@@ -83,6 +94,8 @@ op_tok_to_ast(enum lex_token_type tok)
 			return AST_MUL;
 		case TOK_DIV:
 			return AST_DIV;
+		case TOK_MOD:
+			return AST_MOD;
 		case TOK_EQUAL:
 			return AST_EQUAL;
 		case TOK_NOT_EQUAL:
@@ -113,8 +126,30 @@ is_rvalue(enum lex_token_type tok)
 	}
 }
 
+/* since the type info can be represented in different ways in ast nodes, 
+ * this function gets the right one dependent on ast_type */
+static struct type_info
+ast_type_info(struct ast_instance *ast_in, struct ast_node *node)
+{
+	switch (node->type) {
+
+		case AST_LITERAL:
+			return node->literal.type;
+
+		case AST_IDENTIFIER:
+			return sym_get_entry(ast_in->sym_table, node->sym_id)->type;
+
+		/* we just assume its some other node as part of and expression,
+		 * or an unary node, in which case we also save
+		 * the type of what its pointing at in expr_type*/
+		default:
+			return node->expr_type;
+	}
+}
+
+
 /* allocate and create ast node */
-static struct ast_node*
+inline static struct ast_node*
 make_ast_node(struct ast_instance *ast_in, enum ast_type type,
 			  struct ast_node *left, struct ast_node *center,
 			  struct ast_node *right)
@@ -130,6 +165,7 @@ make_ast_node(struct ast_instance *ast_in, enum ast_type type,
 	return node;
 }
 
+/* create an */
 static struct ast_node*
 make_rvalue_node(struct ast_instance *ast_in, const struct lex_token *token)
 {
@@ -172,97 +208,237 @@ make_lvalue_node(struct ast_instance *ast_in, const struct lex_token *token)
 	return node;
 }
 
+/* helper function to create unary nodes */
+static struct ast_node*
+make_unary_node(struct ast_instance *ast_in, enum ast_type type,
+				struct ast_node *node, struct type_info type_info)
+{
+	struct ast_node *unary_node;
+
+	unary_node = make_ast_node(ast_in, type, node, NULL, NULL);
+
+	/* the type may depent on the type of prefix */
+	unary_node->expr_type = type_info;
+
+	return unary_node;
+}
+
+/* parse function call, curr token must be on identifier */
+static struct ast_node*
+parse_function_call(struct ast_instance *ast_in)
+{
+	struct sym_entry *func;
+
+	/* get current token */
+	struct lex_token token = ast_in->lex_in->curr_token;
+
+	/* find the symbol */
+	int32_t id = sym_find_id(ast_in->sym_table, token.hash);
+
+	/* make sure that it's declared */
+	if (id == SYM_NOT_FOUND) {
+		syntax_error(token.err_loc, "undefined function");
+	}
+
+	/* get entry */
+	func = sym_get_entry(ast_in->sym_table, id);
+
+	/* make sure its a function */
+	if (func->kind == SYM_KIND_FUNCTION) {
+		syntax_error(token.err_loc, "cannot call variabel");
+	}
+
+	/* skip identifier */
+	lex_next_token(ast_in->lex_in);
+
+	/* skip '(', we should not have to check */
+	lex_next_token(ast_in->lex_in);
+
+	/* */
+
+}
+
+/* peek at next token, and determine if it's a postfix, and
+ * if it is we generate the ast tree, and skip the postfix,
+ * otherwise return NULL */
+static struct ast_node*
+parse_postfix(struct ast_instance *ast_in)
+{
+	struct ast_node *node;
+
+	/* peek at next token */
+	struct lex_token token = ast_in->lex_in->next_token;
+
+	switch (token.type) {
+
+		/* function call */
+		case TOK_PAREN_OPEN:
+
+			return parse_function_call(ast_in);
+
+		/* post increment */
+		case TOK_INCREASE:
+
+			lex_next_token(ast_in->lex_in);
+
+			return make_ast_node(ast_in, AST_POST_INCREMENT, NULL, NULL, NULL);
+
+		/* post decrement */
+		case TOK_DECREASE:
+
+			lex_next_token(ast_in->lex_in);
+
+			return make_ast_node(ast_in, AST_POST_DECREMENT, NULL, NULL, NULL);	
+		/* member of struct/union */
+		case TOK_DOT:
+			break;
+
+		/* array access */
+		case TOK_BRACKET_OPEN:
+			break;
+
+	}
+}
+
 /* parses prefix and insures the next token is valid */
 static struct ast_node*
 parse_prefix(struct ast_instance *ast_in)
 {
 	struct ast_node *node = NULL;
+	struct lex_token token = ast_in->lex_in->curr_token;
 
-	switch (ast_in->lex_in->curr_token.type) {
+	/* remeber type to avoid doing lookup later */
+	struct type_info type = NULL_TYPE_INFO;
+
+	/* @todo: type checking */
+
+	/* @refactor: repeating code */
+	switch (token.type) {
 
 		/* unary plus */
 		case TOK_PLUS:
 
-			/* skip '+' */
-			lex_next_token(ast_in->lex_in);
+			token = lex_next_token(ast_in->lex_in);
 
-			if (ast_in->lex_in->curr_token.type == TOK_IDENTIFIER) {
-				node = make_lvalue_node(ast_in, &ast_in->lex_in->curr_token);
-			} else if (is_rvalue(ast_in->lex_in->curr_token.type)) {
-				node = make_rvalue_node(ast_in, &ast_in->lex_in->curr_token);
+			if (token.type == TOK_IDENTIFIER) {
+				node = make_lvalue_node(ast_in, &token);
+				type = sym_get_entry(ast_in->sym_table, node->sym_id)->type;
+			} else if (is_rvalue(token.type)) {
+				node = make_rvalue_node(ast_in, &token);
+				type = node->literal.type;
 			} else {
 				syntax_error(ast_in->lex_in->last_token.err_loc,
 						"unexpected operand for unary operator");
 			}
 
-			return make_ast_node(ast_in, AST_UNARY_PLUS, node, NULL, NULL);
+			return make_unary_node(ast_in, AST_UNARY_PLUS, node, type);
 	
 
 		/* unary minus */
 		case TOK_MINUS:
 
-			/* skip '-' */
-			lex_next_token(ast_in->lex_in);
+			token = lex_next_token(ast_in->lex_in);
 
-			if (ast_in->lex_in->curr_token.type == TOK_IDENTIFIER) {
-				node = make_lvalue_node(ast_in, &ast_in->lex_in->curr_token);
-			} else if (is_rvalue(ast_in->lex_in->curr_token.type)) {
-				node = make_rvalue_node(ast_in, &ast_in->lex_in->curr_token);
+			if (token.type == TOK_IDENTIFIER) {
+				node = make_lvalue_node(ast_in, &token);
+				type = sym_get_entry(ast_in->sym_table, node->sym_id)->type;
+			} else if (is_rvalue(token.type)) {
+				node = make_rvalue_node(ast_in, &token);
+				type = node->literal.type;
 			} else {
 				syntax_error(ast_in->lex_in->last_token.err_loc,
 						"unexpected operand for unary operator");
 			}
 
-			return make_ast_node(ast_in, AST_UNARY_MINUS, node, NULL, NULL);
+			return make_unary_node(ast_in, AST_UNARY_MINUS, node, type);
 
+
+		/* unary not*/
+		case TOK_NOT:
+
+			token = lex_next_token(ast_in->lex_in);
+
+			if (token.type == TOK_IDENTIFIER) {
+				node = make_lvalue_node(ast_in, &token);
+				type = sym_get_entry(ast_in->sym_table, node->sym_id)->type;
+			} else if (is_rvalue(token.type)) {
+				node = make_rvalue_node(ast_in, &token);
+				type = node->literal.type;
+			} else {
+				syntax_error(ast_in->lex_in->last_token.err_loc,
+						"unexpected operand for unary operator");
+			}
+
+			return make_unary_node(ast_in, AST_UNARY_NOT, node, type);
+
+		/* bitwise not */
+		case TOK_NOT_BIT:
+
+			token = lex_next_token(ast_in->lex_in);
+
+			if (token.type == TOK_IDENTIFIER) {
+				node = make_lvalue_node(ast_in, &token);
+				type = sym_get_entry(ast_in->sym_table, node->sym_id)->type;
+			} else if (is_rvalue(token.type)) {
+				node = make_rvalue_node(ast_in, &token);
+				type = node->literal.type;
+			} else {
+				syntax_error(ast_in->lex_in->last_token.err_loc,
+						"unexpected operand for unary operator");
+			}
+
+			return make_unary_node(ast_in, AST_BIT_NOT, node, type);
+		
 
 		/* pre increment */
 		case TOK_INCREASE:
 
-			/* skip '++' */
-			lex_next_token(ast_in->lex_in);
+			token = lex_next_token(ast_in->lex_in);
 
-			if (ast_in->lex_in->curr_token.type == TOK_IDENTIFIER) {
-				node = make_lvalue_node(ast_in, &ast_in->lex_in->curr_token);
-			}
-			/* must be and lvalue */
-			else if (is_rvalue(ast_in->lex_in->curr_token.type)) {
+			if (token.type == TOK_IDENTIFIER) {
+				node = make_lvalue_node(ast_in, &token);
+				type = sym_get_entry(ast_in->sym_table, node->sym_id)->type;
+			} else if (is_rvalue(token.type)) {
 				syntax_error(ast_in->lex_in->last_token.err_loc,
 						"r-value is not assignable");
 			} else {
 				syntax_error(ast_in->lex_in->last_token.err_loc, "prefix error");
 			}
 
-			return make_ast_node(ast_in, AST_PRE_INCREMENT, node, NULL, NULL);
+			return make_unary_node(ast_in, AST_PRE_INCREMENT, node, type);
 
 
 		/* pre decrement */
 		case TOK_DECREASE:
 
-			/* skip '--' */
-			lex_next_token(ast_in->lex_in);
+			token = lex_next_token(ast_in->lex_in);
 
-			if (ast_in->lex_in->curr_token.type == TOK_IDENTIFIER) {
-				node = make_lvalue_node(ast_in, &ast_in->lex_in->curr_token);
-			} else if (is_rvalue(ast_in->lex_in->curr_token.type)) {
+			if (token.type == TOK_IDENTIFIER) {
+				node = make_lvalue_node(ast_in, &token);
+				type = sym_get_entry(ast_in->sym_table, node->sym_id)->type;
+			} else if (is_rvalue(token.type)) {
 				syntax_error(ast_in->lex_in->last_token.err_loc,
 						"r-value is not assignable");
 			} else {
 				syntax_error(ast_in->lex_in->last_token.err_loc, "prefix error");
 			}
 			
-			return make_ast_node(ast_in, AST_PRE_DECREMENT, node, NULL, NULL);
+			return make_unary_node(ast_in, AST_PRE_DECREMENT, node, type);
 
 
 		/* address of */
 		case TOK_AMPERSAND:
 
 			/* skip '~' */
-			lex_next_token(ast_in->lex_in);
+			token = lex_next_token(ast_in->lex_in);
 
-			if (ast_in->lex_in->curr_token.type == TOK_IDENTIFIER) {
-				node = make_lvalue_node(ast_in, &ast_in->lex_in->curr_token);
-			} else if (is_rvalue(ast_in->lex_in->curr_token.type)) {
+			if (token.type == TOK_IDENTIFIER) {
+				node = make_lvalue_node(ast_in, &token);
+				type = sym_get_entry(ast_in->sym_table, node->sym_id)->type;
+				/* always on more level of indirection */
+				++type.indirection;
+
+			} else if (is_rvalue(token.type)) {
 				syntax_error(ast_in->lex_in->last_token.err_loc,
 						"can not take address of rvalue");
 			} else {
@@ -270,17 +446,28 @@ parse_prefix(struct ast_instance *ast_in)
 						"expected expression");
 			}
 
-			return make_ast_node(ast_in, AST_ADDRESS, node, NULL, NULL);
+			return make_unary_node(ast_in, AST_ADDRESS, node, type);
 
 		/* derefrence */
 		case TOK_STAR:
 
 			/* skip '*' */
-			lex_next_token(ast_in->lex_in);
+			token = lex_next_token(ast_in->lex_in);
 
-			if (ast_in->lex_in->curr_token.type == TOK_IDENTIFIER) {
-				node = make_lvalue_node(ast_in, &ast_in->lex_in->curr_token);
-			} else if (is_rvalue(ast_in->lex_in->curr_token.type)) {
+			if (token.type == TOK_IDENTIFIER) {
+				node = make_lvalue_node(ast_in, &token);
+				type = sym_get_entry(ast_in->sym_table, node->sym_id)->type;
+
+				/* make sure it's a pointer */
+				if (type.indirection == 0) {
+					syntax_error(ast_in->lex_in->last_token.err_loc,
+						"can not dereference non pointer");
+				}
+
+				/* set one level lo*/
+				--type.indirection;
+
+			} else if (is_rvalue(token.type)) {
 				syntax_error(ast_in->lex_in->last_token.err_loc,
 						"can not dereference rvalue");
 			} else {
@@ -288,7 +475,7 @@ parse_prefix(struct ast_instance *ast_in)
 						"expected expression");
 			}
 
-			return make_ast_node(ast_in, AST_DEREF, node, NULL, NULL);
+			return make_unary_node(ast_in, AST_DEREF, node, type);
 
 		default:
 			/* returns NULL if the prefix is invalid */
@@ -296,27 +483,36 @@ parse_prefix(struct ast_instance *ast_in)
 	}
 }
 
-/* pratt parser precendeces */
+/* pratt parser precendeces (higher value = higher precendece) */
 static const int ast_precedence[_AST_COUNT] =
 {
 	[AST_UNDEF]				= -1,
 
+	/* primary expression */
 	[AST_IDENTIFIER]		= 0,
 	[AST_LITERAL]			= 0,
 
-	[AST_ADD]				= 1, 
-	[AST_MIN]				= 1,
+	/* assignment */
+	[AST_ASSIGN]			= 1,
 
-	[AST_MUL]				= 2,
-	[AST_DIV]				= 2,
+	/* additive expression */
+	[AST_ADD]				= 2, 
+	[AST_MIN]				= 2,
 
-	[AST_EQUAL]				= 3,
-	[AST_NOT_EQUAL]			= 3,
+	/* multiplicative expression */
+	[AST_MUL]				= 3,
+	[AST_DIV]				= 3,
+	[AST_MOD]				= 3,
 
-	[AST_LESSER]			= 4,
-	[AST_GREATER]			= 4,
-	[AST_LESSER_EQUAL]		= 4,
-	[AST_GREATER_EQUAL]		= 4,
+	/* relational expression */
+	[AST_EQUAL]				= 4,
+	[AST_NOT_EQUAL]			= 4,
+
+	/* comparative expression */
+	[AST_LESSER]			= 5,
+	[AST_GREATER]			= 5,
+	[AST_LESSER_EQUAL]		= 5,
+	[AST_GREATER_EQUAL]		= 5,
 };
 
 /* ie. parsed from right to left */
@@ -331,6 +527,44 @@ is_right_associavity(enum ast_type type)
 	}
 }
 
+/* adapt types if required, or throw error if not compat */
+static void
+expr_type_check(struct ast_instance *ast_in, struct ast_node **left,
+		   struct ast_node **right)
+{
+	enum type_compat compat;
+
+	/* we fetch the compatibility of the righ and left nodes */
+	compat = type_compat(ast_type_info(ast_in, *left),
+						 ast_type_info(ast_in, *right));
+
+	/* we lookup what to do depent in compat */
+	switch (compat) {
+
+		/* if the types a compatible we dont need to do anything */
+		case TYPE_COMPAT_COMPAT:
+			printf("type compat\n");
+			return;
+
+		/* we promote the left or the right */
+		case TYPE_COMPAT_PROMOTE_LEFT:
+			printf("type widen left\n");
+			*left = make_ast_node(ast_in, AST_PROMOTE, *left, NULL, NULL);
+			break;
+
+		case TYPE_COMPAT_PROMOTE_RIGHT:
+			printf("type widen right\n");
+			*right = make_ast_node(ast_in, AST_PROMOTE, *right, NULL, NULL);
+			break;
+
+		/* if they are incompatible we throw a syntax error */
+		case TYPE_COMPAT_INCOMPAT:
+			syntax_error(ast_in->lex_in->curr_token.err_loc,
+					"type incompatible in expression");
+			break;
+	}
+}
+
 /* recursive pratt parser */
 /* expect that the current token, is the first one of the expression */
 static struct ast_node*
@@ -340,6 +574,7 @@ parse_expression(struct ast_instance *ast_in, int32_t prev_prec,
 	struct lex_token token, next_token;
 	struct ast_node *left = NULL, *right, *tmp;
 	enum ast_type node_type;
+	struct type_info expr_type;
 
 	/* get value token */
 	token = ast_in->lex_in->curr_token;
@@ -360,6 +595,12 @@ parse_expression(struct ast_instance *ast_in, int32_t prev_prec,
 		}
 	}
 
+	assert(left);
+
+	/* the type of the expression is the type of
+	 * the left node */
+	expr_type = ast_type_info(ast_in, left);
+
 	/* get op token */
 	next_token = lex_next_token(ast_in->lex_in);
 	if (next_token.type == terminator) {
@@ -379,11 +620,16 @@ parse_expression(struct ast_instance *ast_in, int32_t prev_prec,
 		   (is_right_associavity(node_type) &&
 		   prev_prec == ast_precedence[node_type])) {
 
+		 /* parse the next part of expression */
 		lex_next_token(ast_in->lex_in);
 		right = parse_expression(ast_in, ast_precedence[node_type], terminator);
 
+		/* check type compat, and modify the type required */
+		expr_type_check(ast_in, &left, &right);	
+
 		/* we must handle assignment differently */
 		if (ast_in->lex_in->curr_token.type == TOK_ASSIGN) {
+
 			/* right must be an rvalue when assigning */
 			right->value_type = AST_RVALUE;
 
@@ -401,6 +647,9 @@ parse_expression(struct ast_instance *ast_in, int32_t prev_prec,
 		}
 
 		left = make_ast_node(ast_in, node_type, left, NULL, right);
+
+		/* we set the type of the expression */
+		left->expr_type = expr_type;
 
 		if (ast_in->lex_in->curr_token.type == terminator) {
 			return left;
@@ -483,7 +732,7 @@ set_type_spec(struct type_info *type, enum type_spec spec,
 		syntax_error(*err_loc, "duplicate type specifier");
 	}
 
-	type->spec &= spec;
+	type->spec |= spec;
 }
 
 /* parse a list of symbol specifier */
@@ -811,7 +1060,7 @@ parse_statement(struct ast_instance *ast_in)
 		case TOK_BRACE_OPEN:
 			return parse_compound_statement(ast_in);
 
-		case TOK_KEY_INT:	
+		case TOK_KEY_INT:
 		case TOK_KEY_SHORT:
 		case TOK_KEY_CHAR:
 		case TOK_KEY_FLOAT:
@@ -841,22 +1090,26 @@ parse_compound_statement(struct ast_instance *ast_in)
 {
 	struct ast_node *left = NULL, *tree = NULL;
 
-	assert(ast_in->lex_in->curr_token.type == TOK_BRACE_OPEN);
-
+	/* skip opening '{' */
 	lex_next_token(ast_in->lex_in);
 
+	/* parse all statements until we get a closed brace */
 	for (;;) {
 		if (ast_in->lex_in->curr_token.type == TOK_BRACE_CLOSED) {
 			lex_next_token(ast_in->lex_in);
 			return left;
 		}
 
+		/* parse_statement mat call parse_comound_statement,
+		 * so it is called recursively in nested comound statements */
 		tree = parse_statement(ast_in);
 		
 		if (tree) {
+			/* if its the first statement */
 			if (!left) {
 				left = tree;
 			} else {
+				/* glue together with prev statements */
 				left = make_ast_node(ast_in, AST_NOP, left, NULL, tree);
 			}
 		}
@@ -872,6 +1125,8 @@ parse_function_definition(struct ast_instance *ast_in, int32_t id)
 	return parse_compound_statement(ast_in);	
 }
 
+/* ===================================================================== */
+/*  ============================ PUBLIC =============================== */
 /* ===================================================================== */
 
 struct ast_instance
@@ -895,6 +1150,7 @@ ast_destroy_instance(struct ast_instance *ast_in)
 	mem_pool_destroy(&ast_in->pool);
 }
 
+/* @debug: make this easier to read */
 void
 ast_print_tree(struct ast_node *node, uint32_t level)
 {
