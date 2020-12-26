@@ -1,7 +1,5 @@
-#include "ast.h"
-#include "sym.h"
-#include "lex.h"
-#include "ssa.h"
+#include "frontend/frontend.h"
+#include "backend/ssa.h"
 
 #include <stdio.h>
 #include <assert.h>
@@ -131,9 +129,9 @@ int main()
 
 	//ssa_test(ast_in.tree);
 
+	sym_destroy_table(&table);
 	ast_destroy_instance(&ast_in);
 	lex_destroy_instance(&lex_in);
-	sym_destroy_table(&table);
 
 	return 0;
 }

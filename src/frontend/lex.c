@@ -1,6 +1,4 @@
-#include "def.h"
-#include "sym.h"
-#include "lex.h"
+#include "frontend.h"
 
 #include <assert.h>
 #include <ctype.h>
@@ -205,7 +203,7 @@ lex_tok_str(enum lex_token_type type)
 /* moves the curr pointer by 1, and returns the char
  * also updates the position */
 static char
-next(struct lex_instance *in)
+next(lex_instance_t *in)
 {
 	char c;
 
@@ -226,7 +224,7 @@ next(struct lex_instance *in)
 }
 
 static void
-skip(struct lex_instance *in, uint32_t n)
+skip(lex_instance_t *in, uint32_t n)
 {
 	uint32_t i;
 	for (i = 0; i < n; ++i) {
@@ -235,7 +233,7 @@ skip(struct lex_instance *in, uint32_t n)
 }
 
 static char
-skip_single_line_comment(struct lex_instance *in)
+skip_single_line_comment(lex_instance_t *in)
 {
 	char c = *in->curr;
 
@@ -248,7 +246,7 @@ skip_single_line_comment(struct lex_instance *in)
 }
 
 static char
-skip_multi_line_comment(struct lex_instance *in)
+skip_multi_line_comment(lex_instance_t *in)
 {
 	// skip opening /*
 	skip(in, 2);
@@ -268,7 +266,7 @@ skip_multi_line_comment(struct lex_instance *in)
 }
 
 static char
-skip_whitespace_and_comments(struct lex_instance *in)
+skip_whitespace_and_comments(lex_instance_t *in)
 {
 	for (;;) {
 		switch (*in->curr) {
@@ -297,7 +295,7 @@ skip_whitespace_and_comments(struct lex_instance *in)
 }
 
 static int
-word_len(const struct lex_instance *in)
+word_len(const lex_instance_t *in)
 {
 	uint32_t i = 0;
 	const char *str = in->curr;
@@ -314,7 +312,7 @@ word_len(const struct lex_instance *in)
 }
 
 static int
-number_len(const struct lex_instance *in)
+number_len(const lex_instance_t *in)
 {
 	uint32_t i = 0;
 	const char *str = in->curr;
@@ -330,8 +328,8 @@ number_len(const struct lex_instance *in)
 	return 0;
 }
 
-static int
-string_len(const struct lex_instance *in)
+static uint32_t
+string_len(const lex_instance_t *in)
 {
 	uint32_t i = 0;
 	const char *str = in->curr;
@@ -347,8 +345,8 @@ string_len(const struct lex_instance *in)
 	return 0;
 }
 
-static int
-char_len(const struct lex_instance *in)
+static uint32_t
+char_len(const lex_instance_t *in)
 {
 	uint32_t i = 0, slashes = 0;
 	const char *str = in->curr;
@@ -378,8 +376,8 @@ char_len(const struct lex_instance *in)
 
 #define MAX_SUFFIX_LEN 2
 
-static struct type_info
-parse_suffix(struct lex_instance *lex_in, uint32_t len)
+static type_info_t
+parse_suffix(lex_instance_t *lex_in, uint32_t len)
 {
 	struct type_info type = NULL_TYPE_INFO;
 
@@ -428,7 +426,7 @@ parse_suffix(struct lex_instance *lex_in, uint32_t len)
 	return type;
 }
 
-static enum type_literal_type
+static type_literal_type_t
 parse_decimal_constant(const char *str, uint32_t len, uint64_t *val)
 {
 	uint32_t i = 0;
@@ -458,7 +456,7 @@ parse_decimal_constant(const char *str, uint32_t len, uint64_t *val)
 	return TYPE_LIT_FLOAT;
 }
 
-static enum type_literal_type
+static type_literal_type_t
 parse_octal_constant(const char *str, uint32_t len, uint64_t *val)
 {
 	uint32_t i = 0;
@@ -488,7 +486,7 @@ parse_octal_constant(const char *str, uint32_t len, uint64_t *val)
 	return TYPE_LIT_FLOAT;
 }
 
-static enum type_literal_type
+static type_literal_type_t
 parse_hex_constant(const char *str, uint32_t len, uint64_t *val)
 {
 	uint32_t i = 0;
@@ -518,7 +516,7 @@ parse_string_literal(const char *str, uint32_t len, char *buffer)
 }
 
 static int32_t
-parse_multichar_constant(const struct lex_instance *in, uint32_t len)
+parse_multichar_constant(const lex_instance_t *in, uint32_t len)
 {
 	syntax_warning(err_loc(in), "multi-character constant");
 
@@ -530,7 +528,7 @@ parse_multichar_constant(const struct lex_instance *in, uint32_t len)
 }
 
 static int
-parse_char_literal(const struct lex_instance *in, uint32_t len)
+parse_char_literal(const lex_instance_t *in, uint32_t len)
 {
 	uint64_t c		= 0;
 	const char *str = in->curr;
@@ -619,8 +617,8 @@ parse_char_literal(const struct lex_instance *in, uint32_t len)
 }
 
 /* lookup table with pre hashed values for keywords */
-static enum lex_token_type
-lookup_keyword(int64_t hash, uint32_t len)
+static lex_token_type_t
+lookup_keyword(sym_hash_t hash, uint32_t len)
 {
 	switch (len) {
 		case 2:
@@ -710,7 +708,7 @@ lookup_keyword(int64_t hash, uint32_t len)
 	return TOK_IDENTIFIER;
 }
 
-static enum lex_token_type
+static lex_token_type_t
 lookup_symbol(const char *str, uint32_t *symbol_len)
 {
 	switch (*str) {
@@ -865,7 +863,7 @@ lookup_symbol(const char *str, uint32_t *symbol_len)
 /* ================================================================================= */
 
 struct err_location
-err_loc(const struct lex_instance *lex_in)
+err_loc(const lex_instance_t *lex_in)
 {
 	struct err_location loc = { 
 		.line = lex_in->line,
@@ -876,12 +874,12 @@ err_loc(const struct lex_instance *lex_in)
 	return loc;
 }
 
-struct lex_instance
+lex_instance_t
 lex_create_instance(const char *filename)
 {
 	uint32_t filename_size;
 	size_t file_size;
-	struct lex_instance lex_in;
+	lex_instance_t lex_in;
 	FILE *file = fopen(filename, "r");
 
 	if (!file) {
@@ -916,7 +914,7 @@ lex_create_instance(const char *filename)
 }
 
 void
-lex_destroy_instance(struct lex_instance *in)
+lex_destroy_instance(lex_instance_t *in)
 {
 	c_free(in->start);
 	c_free(in->filename);
@@ -929,13 +927,13 @@ lex_destroy_instance(struct lex_instance *in)
 }
 
 
-struct lex_token
-lex_next_token(struct lex_instance *in)
+lex_token_t
+lex_next_token(lex_instance_t *in)
 {
 	char c;
 	uint32_t token_len;
 	enum type_literal_type lit_type;
-	struct type_info suffix_type;
+	type_info_t suffix_type;
 
 	c = skip_whitespace_and_comments(in);
 

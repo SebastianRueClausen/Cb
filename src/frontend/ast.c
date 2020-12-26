@@ -1,7 +1,4 @@
-#include "ast.h"
-#include "lex.h"
-#include "def.h"
-#include "sym.h"
+#include "frontend.h"
 
 #include <assert.h>
 #include <stdbool.h>
@@ -64,7 +61,7 @@ static const char* ast_str[] =
 };
 
 const char*
-ast_to_str(enum ast_type type)
+ast_to_str(ast_type_t type)
 {
 	return ast_str[type];
 }
@@ -72,7 +69,7 @@ ast_to_str(enum ast_type type)
 #else
 
 const char*
-ast_to_str(enum ast_type type)
+ast_to_str(ast_type_t type)
 {
 	return "DEBUG";
 }
@@ -82,8 +79,8 @@ ast_to_str(enum ast_type type)
 /* operation tokens used in expressions */
 /* @perforamce: make sections lign up with token type for farster,
  * conversion */
-static enum ast_type
-op_tok_to_ast(enum lex_token_type tok)
+static ast_type_t
+op_tok_to_ast(lex_token_type_t tok)
 {
 	switch (tok) {
 		case TOK_PLUS:
@@ -116,7 +113,7 @@ op_tok_to_ast(enum lex_token_type tok)
 }
 
 static bool
-is_rvalue(enum lex_token_type tok)
+is_rvalue(lex_token_type_t tok)
 {
 	switch (tok) {
 		case TOK_LITERAL:
@@ -128,8 +125,8 @@ is_rvalue(enum lex_token_type tok)
 
 /* since the type info can be represented in different ways in ast nodes, 
  * this function gets the right one dependent on ast_type */
-static struct type_info
-ast_type_info(struct ast_instance *ast_in, struct ast_node *node)
+static type_info_t
+ast_type_info(ast_instance_t *ast_in, ast_node_t *node)
 {
 	switch (node->type) {
 
@@ -149,27 +146,25 @@ ast_type_info(struct ast_instance *ast_in, struct ast_node *node)
 
 
 /* allocate and create ast node */
-inline static struct ast_node*
-make_ast_node(struct ast_instance *ast_in, enum ast_type type,
-			  struct ast_node *left, struct ast_node *center,
-			  struct ast_node *right)
+inline static ast_node_t*
+make_ast_node(ast_instance_t *ast_in, ast_type_t type,
+			  ast_node_t *left, ast_node_t *center,
+			  ast_node_t *right)
 {
-	struct ast_node *node;
-
-	node = mem_pool_alloc(&ast_in->pool, sizeof(struct ast_node));
-	node->left = left;
-	node->center = center;
-	node->right	= right;
-	node->type = type;
+	ast_node_t *node	= mem_pool_alloc(&ast_in->pool, sizeof(ast_node_t));
+	node->left			= left;
+	node->center		= center;
+	node->right			= right;
+	node->type			= type;
 
 	return node;
 }
 
 /* create an */
-static struct ast_node*
-make_rvalue_node(struct ast_instance *ast_in, const struct lex_token *token)
+inline static ast_node_t*
+make_rvalue_node(ast_instance_t *ast_in, const lex_token_t *token)
 {
-	struct ast_node *node;
+	ast_node_t *node;
 
 	switch (token->type) {
 		case TOK_LITERAL:
@@ -189,11 +184,11 @@ make_rvalue_node(struct ast_instance *ast_in, const struct lex_token *token)
 }
 
 /* assumes the symbol already exists and creates a node */
-static struct ast_node*
-make_lvalue_node(struct ast_instance *ast_in, const struct lex_token *token)
+inline static ast_node_t*
+make_lvalue_node(ast_instance_t *ast_in, const lex_token_t *token)
 {
 	int32_t id;
-	struct ast_node *node;
+	ast_node_t *node;
 
 	id = sym_find_id(ast_in->sym_table, token->hash);
 
@@ -209,11 +204,11 @@ make_lvalue_node(struct ast_instance *ast_in, const struct lex_token *token)
 }
 
 /* helper function to create unary nodes */
-static struct ast_node*
-make_unary_node(struct ast_instance *ast_in, enum ast_type type,
-				struct ast_node *node, struct type_info type_info)
+inline static ast_node_t*
+make_unary_node(ast_instance_t *ast_in, ast_type_t type,
+				ast_node_t *node, type_info_t type_info)
 {
-	struct ast_node *unary_node;
+	ast_node_t *unary_node;
 
 	unary_node = make_ast_node(ast_in, type, node, NULL, NULL);
 
@@ -224,13 +219,13 @@ make_unary_node(struct ast_instance *ast_in, enum ast_type type,
 }
 
 /* parse function call, curr token must be on identifier */
-static struct ast_node*
-parse_function_call(struct ast_instance *ast_in)
+static ast_node_t*
+parse_function_call(ast_instance_t *ast_in)
 {
-	struct sym_entry *func;
+	sym_entry_t *func;
 
 	/* get current token */
-	struct lex_token token = ast_in->lex_in->curr_token;
+	lex_token_t token = ast_in->lex_in->curr_token;
 
 	/* find the symbol */
 	int32_t id = sym_find_id(ast_in->sym_table, token.hash);
@@ -261,13 +256,13 @@ parse_function_call(struct ast_instance *ast_in)
 /* peek at next token, and determine if it's a postfix, and
  * if it is we generate the ast tree, and skip the postfix,
  * otherwise return NULL */
-static struct ast_node*
-parse_postfix(struct ast_instance *ast_in)
+static ast_node_t*
+parse_postfix(ast_instance_t *ast_in)
 {
-	struct ast_node *node;
+	ast_node_t *node;
 
 	/* peek at next token */
-	struct lex_token token = ast_in->lex_in->next_token;
+	lex_token_t token = ast_in->lex_in->next_token;
 
 	switch (token.type) {
 
@@ -297,18 +292,21 @@ parse_postfix(struct ast_instance *ast_in)
 		case TOK_BRACKET_OPEN:
 			break;
 
+		default:
+			assert(false);
+
 	}
 }
 
 /* parses prefix and insures the next token is valid */
-static struct ast_node*
-parse_prefix(struct ast_instance *ast_in)
+static ast_node_t*
+parse_prefix(ast_instance_t *ast_in)
 {
-	struct ast_node *node = NULL;
-	struct lex_token token = ast_in->lex_in->curr_token;
+	ast_node_t *node = NULL;
+	lex_token_t token = ast_in->lex_in->curr_token;
 
 	/* remeber type to avoid doing lookup later */
-	struct type_info type = NULL_TYPE_INFO;
+	type_info_t type = NULL_TYPE_INFO;
 
 	/* @todo: type checking */
 
@@ -517,7 +515,7 @@ static const int ast_precedence[_AST_COUNT] =
 
 /* ie. parsed from right to left */
 static bool
-is_right_associavity(enum ast_type type)
+is_right_associavity(ast_type_t type)
 {
 	switch (type) {
 		case AST_ASSIGN:
@@ -529,10 +527,10 @@ is_right_associavity(enum ast_type type)
 
 /* adapt types if required, or throw error if not compat */
 static void
-expr_type_check(struct ast_instance *ast_in, struct ast_node **left,
-		   struct ast_node **right)
+expr_type_check(ast_instance_t *ast_in, ast_node_t **left,
+		   ast_node_t **right)
 {
-	enum type_compat compat;
+	type_compat_t compat;
 
 	/* we fetch the compatibility of the righ and left nodes */
 	compat = type_compat(ast_type_info(ast_in, *left),
@@ -567,14 +565,14 @@ expr_type_check(struct ast_instance *ast_in, struct ast_node **left,
 
 /* recursive pratt parser */
 /* expect that the current token, is the first one of the expression */
-static struct ast_node*
-parse_expression(struct ast_instance *ast_in, int32_t prev_prec,
-				 enum lex_token_type terminator)
+static ast_node_t*
+parse_expression(ast_instance_t *ast_in, int32_t prev_prec,
+				 lex_token_type_t terminator)
 {
-	struct lex_token token, next_token;
-	struct ast_node *left = NULL, *right, *tmp;
-	enum ast_type node_type;
-	struct type_info expr_type;
+	lex_token_t token, next_token;
+	ast_node_t *left = NULL, *right, *tmp;
+	ast_type_t node_type;
+	type_info_t expr_type;
 
 	/* get value token */
 	token = ast_in->lex_in->curr_token;
@@ -669,7 +667,7 @@ parse_expression(struct ast_instance *ast_in, int32_t prev_prec,
 
 /* just used by the function below to call errors */
 inline static const char*
-tok_err_str(enum lex_token_type type)
+tok_err_str(lex_token_type_t type)
 {
 	switch (type) {
 		case TOK_SEMIKOLON:
@@ -690,7 +688,7 @@ tok_err_str(enum lex_token_type type)
 }
 
 inline static void
-assert_token(struct ast_instance *ast_in, enum lex_token_type type)
+assert_token(ast_instance_t *ast_in, lex_token_type_t type)
 {
 	if (ast_in->lex_in->curr_token.type != type) {
 		syntax_error(ast_in->lex_in->curr_token.err_loc, "expected '%s'",
@@ -700,20 +698,20 @@ assert_token(struct ast_instance *ast_in, enum lex_token_type type)
 
 /* parse single token, and throw error if different token is found */
 inline static void
-parse_token(struct ast_instance *ast_in, enum lex_token_type type)
+parse_token(ast_instance_t *ast_in, lex_token_type_t type)
 {
 	assert_token(ast_in, type);
 
 	lex_next_token(ast_in->lex_in);
 }
 
-static struct ast_node*
-parse_compound_statement(struct ast_instance *ast_in);
+static ast_node_t*
+parse_compound_statement(ast_instance_t *ast_in);
 
 /* asserts that we doesnt set a type prim more than once */
 inline static void
-set_type_prim(struct type_info *type, enum type_prim prim,
-			  const struct err_location *err_loc)
+set_type_prim(type_info_t *type, type_prim_t prim,
+			  const err_location_t *err_loc)
 {
 	if (type->prim != TYPE_PRIM_NONE) {
 		syntax_error(*err_loc, "duplicate type specifier");
@@ -725,8 +723,8 @@ set_type_prim(struct type_info *type, enum type_prim prim,
 /* check that we doesnt set a type spec more than once,
  * we check for conflicts such as signed and unsigned when we are done */
 inline static void
-set_type_spec(struct type_info *type, enum type_spec spec,
-			  const struct err_location *err_loc)
+set_type_spec(type_info_t *type, type_spec_t spec,
+			  const err_location_t *err_loc)
 {
 	if (type->spec & spec) {
 		syntax_error(*err_loc, "duplicate type specifier");
@@ -736,10 +734,10 @@ set_type_spec(struct type_info *type, enum type_spec spec,
 }
 
 /* parse a list of symbol specifier */
-static struct type_info
-parse_type(struct ast_instance *ast_in)
+static type_info_t
+parse_type(ast_instance_t *ast_in)
 {
-	struct type_info type = NULL_TYPE_INFO;
+	type_info_t type = NULL_TYPE_INFO;
 
 	for (;;) {
 		switch (ast_in->lex_in->curr_token.type) {
@@ -820,11 +818,11 @@ parse_type(struct ast_instance *ast_in)
 	}
 }
 
-static struct ast_node*
-parse_function_definition(struct ast_instance *ast_in, int32_t id);
+static ast_node_t*
+parse_function_definition(ast_instance_t *ast_in, int32_t id);
 
-static struct ast_node*
-parse_function_declaration(struct ast_instance *ast_in, int32_t id)
+static ast_node_t*
+parse_function_declaration(ast_instance_t *ast_in, int32_t id)
 {
 	/* @note skip params for now */
 	while (ast_in->lex_in->curr_token.type != TOK_PAREN_CLOSED) {
@@ -842,14 +840,14 @@ parse_function_declaration(struct ast_instance *ast_in, int32_t id)
 }
 
 /* called when we get a type specifier token */
-static struct ast_node*
-parse_declaration(struct ast_instance *ast_in, struct sym_table *table)
+static ast_node_t*
+parse_declaration(ast_instance_t *ast_in, sym_table_t *table)
 {
 	int32_t id;
-	int64_t sym_hash;
-	struct ast_node *right, *left;
-	struct sym_entry sym_entry;
-	enum lex_token_type tok_type;
+	sym_hash_t sym_hash;
+	ast_node_t *right, *left;
+	sym_entry_t sym_entry;
+	lex_token_type_t tok_type;
 
 	/* loops through type specifiers */
 	sym_entry.type = parse_type(ast_in);
@@ -934,17 +932,17 @@ parse_declaration(struct ast_instance *ast_in, struct sym_table *table)
 	}
 }
 
-static struct ast_node*
-parse_else_statement(struct ast_instance *ast_in)
+static ast_node_t*
+parse_else_statement(ast_instance_t *ast_in)
 {
 	lex_next_token(ast_in->lex_in);
 	return parse_statement(ast_in);
 }
 
-static struct ast_node*
-parse_if_statement(struct ast_instance *ast_in)
+static ast_node_t*
+parse_if_statement(ast_instance_t *ast_in)
 {
-	struct ast_node *condition_ast, *true_ast, *false_ast;
+	ast_node_t *condition_ast, *true_ast, *false_ast;
 
 	/* skip 'if' token */
 	lex_next_token(ast_in->lex_in);
@@ -972,10 +970,10 @@ parse_if_statement(struct ast_instance *ast_in)
 	return make_ast_node(ast_in, AST_IF, condition_ast, true_ast, false_ast);
 }
 
-static struct ast_node*
-parse_while_loop(struct ast_instance *ast_in)
+static ast_node_t*
+parse_while_loop(ast_instance_t *ast_in)
 {
-	struct ast_node *condition_ast, *body_ast;
+	ast_node_t *condition_ast, *body_ast;
 
 	/* skip 'while' token */	
 	lex_next_token(ast_in->lex_in);
@@ -997,10 +995,10 @@ parse_while_loop(struct ast_instance *ast_in)
 
 }
 
-static struct ast_node*
-parse_for_loop(struct ast_instance *ast_in)
+static ast_node_t*
+parse_for_loop(ast_instance_t *ast_in)
 {
-	struct ast_node *tree, *body, *cond, *pre_op, *post_op;
+	ast_node_t *tree, *body, *cond, *pre_op, *post_op;
 
 	/* skip opening 'for' token */
 	lex_next_token(ast_in->lex_in);
@@ -1037,11 +1035,11 @@ parse_for_loop(struct ast_instance *ast_in)
 
 /* creates an ast tree from a single statement, which can include compound statements */
 /* expect the current token to be the first of the statement */
-struct ast_node*
-parse_statement(struct ast_instance *ast_in)
+ast_node_t*
+parse_statement(ast_instance_t *ast_in)
 {
-	struct lex_token token = ast_in->lex_in->curr_token;
-	struct ast_node *tree;
+	lex_token_t token = ast_in->lex_in->curr_token;
+	ast_node_t *tree;
 
 	switch (token.type) {
 		case TOK_KEY_IF:
@@ -1085,10 +1083,10 @@ parse_statement(struct ast_instance *ast_in)
 }
 
 /* loops through all statements in a compound statement and creates an ast tree */
-static struct ast_node*
-parse_compound_statement(struct ast_instance *ast_in)
+static ast_node_t*
+parse_compound_statement(ast_instance_t *ast_in)
 {
-	struct ast_node *left = NULL, *tree = NULL;
+	ast_node_t *left = NULL, *tree = NULL;
 
 	/* skip opening '{' */
 	lex_next_token(ast_in->lex_in);
@@ -1116,8 +1114,8 @@ parse_compound_statement(struct ast_instance *ast_in)
 	}
 }
 
-static struct ast_node*
-parse_function_definition(struct ast_instance *ast_in, int32_t id)
+static ast_node_t*
+parse_function_definition(ast_instance_t *ast_in, int32_t id)
 {
 	assert(ast_in->lex_in->curr_token.type == TOK_BRACE_OPEN);
 	id = 0;
@@ -1129,10 +1127,10 @@ parse_function_definition(struct ast_instance *ast_in, int32_t id)
 /*  ============================ PUBLIC =============================== */
 /* ===================================================================== */
 
-struct ast_instance
-ast_create_instance(struct lex_instance *lex_in, struct sym_table *table)
+ast_instance_t
+ast_create_instance(lex_instance_t *lex_in, sym_table_t *table)
 {
-	const struct ast_instance ast_in =
+	const ast_instance_t ast_in =
 	{
 		.lex_in				= lex_in,
 		.pool				= mem_pool_create(1024),
@@ -1143,7 +1141,7 @@ ast_create_instance(struct lex_instance *lex_in, struct sym_table *table)
 }
 
 void
-ast_destroy_instance(struct ast_instance *ast_in)
+ast_destroy_instance(ast_instance_t *ast_in)
 {
 	ast_in->lex_in = NULL;
 	ast_in->tree = NULL;
@@ -1152,7 +1150,7 @@ ast_destroy_instance(struct ast_instance *ast_in)
 
 /* @debug: make this easier to read */
 void
-ast_print_tree(struct ast_node *node, uint32_t level)
+ast_print_tree(ast_node_t *node, uint32_t level)
 {
 	uint32_t i;
 
@@ -1181,7 +1179,7 @@ ast_print_tree(struct ast_node *node, uint32_t level)
 }
 
 void
-ast_print_tree_postorder(struct ast_node *node)
+ast_print_tree_postorder(ast_node_t *node)
 {
 	if (!node) {
 		return;
@@ -1203,13 +1201,12 @@ ast_print_tree_postorder(struct ast_node *node)
 
 }
 
-
 void
 ast_test()
 {
-	struct lex_instance lex_in;
-	struct ast_instance ast_in;
-	struct sym_table table;
+	lex_instance_t lex_in;
+	ast_instance_t ast_in;
+	sym_table_t table;
 
 	lex_in = lex_create_instance("../test/test4.c");
 	sym_create_table(&table, 10);

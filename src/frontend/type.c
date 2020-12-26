@@ -1,4 +1,4 @@
-#include "type.h"
+#include "frontend.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -6,7 +6,7 @@
 
 /* check for conflicts of a type info */
 void
-type_check_conflicts(struct type_info type, struct err_location *err_loc)
+type_check_conflicts(type_info_t type, err_location_t *err_loc)
 {
 	switch (type.prim) {
 		case TYPE_PRIM_FLOAT:
@@ -54,7 +54,7 @@ static uint32_t type_prim_width[_TYPE_PRIM_COUNT] =
 };
 
 size_t
-type_get_width(const struct type_info type)
+type_get_width(const type_info_t type)
 {
 	if (type.indirection != 0) {
 		return 8;
@@ -74,8 +74,8 @@ type_get_width(const struct type_info type)
 }
 
 /* check the compat of two types */
-enum type_compat
-type_compat(struct type_info left, struct type_info right)
+type_compat_t
+type_compat(type_info_t left, type_info_t right)
 {
 	uint32_t left_width, right_width;
 
@@ -96,7 +96,7 @@ type_compat(struct type_info left, struct type_info right)
 		return TYPE_COMPAT_COMPAT;
 	}
 
-	/* @TODO we should check how much we should widen with */
+	/* @todo: we should check how much we should widen with */
 	if (left_width > right_width) {
 		return TYPE_COMPAT_PROMOTE_RIGHT;
 	}
@@ -108,11 +108,11 @@ type_compat(struct type_info left, struct type_info right)
 	return TYPE_COMPAT_COMPAT;
 }
 
-struct type_info
-type_deduct_from_literal(union type_literal_value lit,
-						 enum type_literal_type lit_type)
+type_info_t
+type_deduct_from_literal(type_literal_value_t lit,
+						 type_literal_type_t lit_type)
 {
-	struct type_info type = NULL_TYPE_INFO;
+	type_info_t type = NULL_TYPE_INFO;
 
 	type.indirection = 0;
 	type.spec = 0;
@@ -152,9 +152,9 @@ type_deduct_from_literal(union type_literal_value lit,
 
 /* should already be checked that the suffix and literal are compat, 
  * we just change the type of the literal so it matches the suffix */
-struct type_info
-type_adapt_to_suffix(struct type_info suffix, struct type_info literal,
-					 struct err_location err_loc)
+type_info_t
+type_adapt_to_suffix(type_info_t suffix, type_info_t literal,
+					 err_location_t err_loc)
 {
 
 	switch (literal.prim) {
@@ -219,7 +219,7 @@ static const char* type_spec_str[] =
 };
 
 void
-type_print(const struct type_info type)
+type_print(const type_info_t type)
 {
 	uint32_t i;
 
