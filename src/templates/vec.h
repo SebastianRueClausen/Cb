@@ -42,7 +42,9 @@ static inline void
 TEMPLATE_SIGNATURE(VEC_SIGNATURE, reserve)(VEC_SIGNATURE *vec, size_t capacity)
 {
 	if (vec->capacity != capacity) {
+		printf("reserve new size : %lu\n", capacity * sizeof(VEC_TYPE));
 		vec->data = realloc(vec->data, capacity * sizeof(VEC_TYPE));
+		printf("reserve new size 2: %lu\n", capacity * sizeof(VEC_TYPE));
 		
 		if (capacity < vec->size) {
 			vec->size = capacity;

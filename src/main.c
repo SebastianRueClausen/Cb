@@ -108,30 +108,29 @@ run_test3()
 
 int main()
 {
-	// run_test1();
-	// run_test2();
-	// run_test3();
-	// run_test4();
-	// ast_test();
+	frontend_t frontend;
+	ast_node_t *tree;
 
-	struct lex_instance lex_in;
-	struct ast_instance ast_in;
-	struct sym_table table;
+	frontend_create(&frontend, "../test/test5.c");
 
-	lex_in = lex_create_instance("../test/test5.c");
-	sym_create_table(&table, 10);
-	ast_in = ast_create_instance(&lex_in, &table);
+	lex_next_token(&frontend);
 
-	lex_next_token(&lex_in);
+	tree = ast_parse(&frontend);
 
-	ast_in.tree = parse_statement(&ast_in);
-	ast_print_tree(ast_in.tree, 0);
+	while (tree) {
 
-	//ssa_test(ast_in.tree);
+		printf("== FUNC ==\n");
+		ast_print_tree(tree, 0);
+		printf("\n");
+	
+		tree = ast_parse(&frontend);
+	}
 
-	sym_destroy_table(&table);
-	ast_destroy_instance(&ast_in);
-	lex_destroy_instance(&lex_in);
+	tree = parse_statement(&frontend); 
+
+	ast_print_tree(tree, 0);
+
+	frontend_destroy(&frontend);
 
 	return 0;
 }

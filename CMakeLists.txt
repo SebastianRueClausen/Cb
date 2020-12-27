@@ -11,12 +11,14 @@ add_executable(Cb
 
 	# src files
 	src/main.c
+	src/mem.c
+	src/err.c
 
 	src/frontend/sym.c
 	src/frontend/ast.c
-	src/frontend/def.c
 	src/frontend/lex.c
 	src/frontend/type.c
+	src/frontend/frontend.c
 
 	src/backend/ssa.c
 )

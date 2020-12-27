@@ -10,6 +10,8 @@
  * parses the raw text into tokens
  */
 
+/* @note: should the static functions also take a frontend_t? */
+
 static const char *tok_debug_str[_TOK_COUNT] = {
 	"TOK_UNKNOWN",
 	"TOK_LIT",
@@ -96,7 +98,7 @@ static const char *tok_debug_str[_TOK_COUNT] = {
 };
 
 const char*
-lex_tok_debug_str(enum lex_token_type type)
+lex_tok_debug_str(lex_token_type_t type)
 {
 	return tok_debug_str[type];
 }
@@ -862,10 +864,10 @@ lookup_symbol(const char *str, uint32_t *symbol_len)
 
 /* ================================================================================= */
 
-struct err_location
+err_location_t
 err_loc(const lex_instance_t *lex_in)
 {
-	struct err_location loc = { 
+	err_location_t loc = { 
 		.line = lex_in->line,
 		.col = lex_in->col,
 		.filename = lex_in->filename
@@ -907,9 +909,6 @@ lex_create_instance(const char *filename)
 
 	fclose(file);
 
-	/* lex the first node, so next lex_next_token gets the first node */
-	lex_next_token(&lex_in);	
-	
 	return lex_in;
 }
 
@@ -928,83 +927,84 @@ lex_destroy_instance(lex_instance_t *in)
 
 
 lex_token_t
-lex_next_token(lex_instance_t *in)
+lex_next_token(frontend_t *f)
 {
 	char c;
 	uint32_t token_len;
 	enum type_literal_type lit_type;
 	type_info_t suffix_type;
+	lex_instance_t *lex = &f->lex;
 
-	c = skip_whitespace_and_comments(in);
+	c = skip_whitespace_and_comments(lex);
 
-	in->last_token = in->curr_token;
-	in->curr_token = in->next_token;
+	f->lex.last_token = f->lex.curr_token;
+	f->lex.curr_token = f->lex.next_token;
 
 	if (isalpha(c) || c == '_') {
-		token_len = word_len(in);
-		in->next_token.hash = sym_hash(in->curr, token_len);
-		in->next_token.type = lookup_keyword(in->next_token.hash, token_len);
-		skip(in, token_len);
-	} else if (isdigit(c) || (c == '.' && isdigit(in->curr[1]))) {
-		in->next_token.type = TOK_LITERAL;
+		token_len = word_len(lex);
+		lex->next_token.hash = sym_hash(lex->curr, token_len);
+		lex->next_token.type = lookup_keyword(lex->next_token.hash, token_len);
+		skip(lex, token_len);
+	} else if (isdigit(c) || (c == '.' && isdigit(lex->curr[1]))) {
+		lex->next_token.type = TOK_LITERAL;
 
-		token_len = number_len(in);
+		token_len = number_len(lex);
 
-		lit_type = parse_decimal_constant(in->curr, token_len,
-			&in->next_token.literal.value.val_int);
+		lit_type = parse_decimal_constant(lex->curr, token_len,
+			&lex->next_token.literal.value.val_int);
 		
 		/* set type */
-		in->next_token.literal.type = type_deduct_from_literal(
-			in->next_token.literal.value,
+		lex->next_token.literal.type = type_deduct_from_literal(
+			lex->next_token.literal.value,
 			lit_type
 		);
 
 		/* skip the number */
-		skip(in, token_len);
+		skip(lex, token_len);
 
 		/* parse suffix */				
-		token_len = word_len(in);
+		token_len = word_len(lex);
 
 		if (token_len) {
-			suffix_type = parse_suffix(in, token_len);
+			suffix_type = parse_suffix(lex, token_len);
 
-			in->next_token.literal.type = type_adapt_to_suffix(suffix_type,
-					in->next_token.literal.type, err_loc(in));
+			lex->next_token.literal.type = type_adapt_to_suffix(suffix_type,
+					lex->next_token.literal.type, err_loc(lex));
 
-			skip(in, token_len);
+			skip(lex, token_len);
 		}
 		
 	} else if (c == '"') {
-		/* TODO add parsing for strings, and remember deducting the type */
-		in->next_token.type = TOK_LITERAL;
+		/* @todo: add parsing for strings, and remember deducting the type */
+		lex->next_token.type = TOK_LITERAL;
 
-		next(in);
+		next(lex);
 
-		token_len = string_len(in);
+		token_len = string_len(lex);
 
-		skip(in, token_len + 1);
+		skip(lex, token_len + 1);
 
 	} else if (c == '\'') {
-		in->next_token.type = TOK_LITERAL;
+		lex->next_token.type = TOK_LITERAL;
 
-		next(in);
-		token_len = char_len(in);
+		next(lex);
+		token_len = char_len(lex);
 
 		/* get value */
-		in->next_token.literal.value.val_int = parse_char_literal(in, token_len);
+		lex->next_token.literal.value.val_int = parse_char_literal(lex, token_len);
 
 		/* @note: store as uint32 for now, however should perhaps
 		 * store as uint8 */
-		in->next_token.literal.type.prim = TYPE_PRIM_INT;
-		in->next_token.literal.type.prim &= TYPE_SPEC_UNSIGNED;
+		lex->next_token.literal.type.prim = TYPE_PRIM_INT;
+		lex->next_token.literal.type.prim &= TYPE_SPEC_UNSIGNED;
 
-		skip(in, token_len + 1);
+		skip(lex, token_len + 1);
 
 	} else {
-		in->next_token.type = lookup_symbol(in->curr, &token_len);
-		skip(in, token_len);
+		lex->next_token.type = lookup_symbol(lex->curr, &token_len);
+		skip(lex, token_len);
 	}
 
-	in->next_token.err_loc = err_loc(in);
-	return in->curr_token;
+	lex->next_token.err_loc = err_loc(lex);
+	return lex->curr_token;
 }

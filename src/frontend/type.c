@@ -4,38 +4,62 @@
 #include <stdio.h>
 #include <assert.h>
 
+static void
+deduct_prim(type_info_t *type, err_location_t *err_loc)
+{
+	assert(type->prim == TYPE_PRIM_NONE);
+
+	const type_spec_t is_int = TYPE_SPEC_UNSIGNED | TYPE_SPEC_SIGNED |
+							   TYPE_SPEC_SHORT	  | TYPE_SPEC_LONG;
+
+	if (type->spec & is_int) {
+		type->prim = TYPE_PRIM_INT;
+		return;
+	}
+
+	syntax_error(*err_loc, "type specifier missing");			
+}
+
 /* check for conflicts of a type info */
 void
-type_check_conflicts(type_info_t type, err_location_t *err_loc)
+type_check_validity(type_info_t *type, err_location_t *err_loc)
 {
-	switch (type.prim) {
+	switch (type->prim) {
 		case TYPE_PRIM_FLOAT:
-			if (type.spec & TYPE_SPEC_SIGNED || type.spec & TYPE_SPEC_UNSIGNED) {
+			if (type->spec & TYPE_SPEC_SIGNED || type->spec & TYPE_SPEC_UNSIGNED) {
 				syntax_error(*err_loc, "type float can not be specified "
 										"as signed or unsigned");
-			} else if (type.spec & TYPE_SPEC_LONG) {
+			} else if (type->spec & TYPE_SPEC_LONG) {
 				syntax_error(*err_loc, "type float can not be specified as long");
-			} else if (type.spec & TYPE_SPEC_SHORT) {
+			} else if (type->spec & TYPE_SPEC_SHORT) {
 				syntax_error(*err_loc, "type float can not be specified as short");
 			}
 			break;
 
 		case TYPE_PRIM_DOUBLE:	
-			if (type.spec& TYPE_SPEC_SIGNED || type.spec& TYPE_SPEC_UNSIGNED) {
+			if (type->spec& TYPE_SPEC_SIGNED || type->spec& TYPE_SPEC_UNSIGNED) {
 				syntax_error(*err_loc, "type double can not be specified "
 										"as signed or unsigned");
-			} else if (type.spec & TYPE_SPEC_LONG) {
+			} else if (type->spec & TYPE_SPEC_LONG) {
 				syntax_error(*err_loc, "type double can not be specified as long");
-			} else if (type.spec & TYPE_SPEC_SHORT) {
+			} else if (type->spec & TYPE_SPEC_SHORT) {
 				syntax_error(*err_loc, "type double can not be specified as short");
 			}
 			break;
 
 		/* applies to all other types */
 		default:
-			if (type.spec & TYPE_SPEC_SIGNED && type.spec & TYPE_SPEC_UNSIGNED) {
+			/* check that there is a primitive */
+			if (type->prim == TYPE_PRIM_NONE) {
+				/* a type could be specified as fx 'unsigned i', which
+				 * would still be valid even tough a prim isnt set */
+				/* throws error if unable to */
+				deduct_prim(type, err_loc);
+			}
+			
+			if (type->spec & TYPE_SPEC_SIGNED && type->spec & TYPE_SPEC_UNSIGNED) {
 				syntax_error(*err_loc, "type can not be specified as signed and unsigned");
-			} else if (type.spec & TYPE_SPEC_LONG && type.spec & TYPE_SPEC_SHORT) {
+			} else if (type->spec & TYPE_SPEC_LONG && type->spec & TYPE_SPEC_SHORT) {
 				syntax_error(*err_loc, "type can not be specified as short and long");
 			}
 			break;
@@ -191,6 +215,17 @@ type_adapt_to_suffix(type_info_t suffix, type_info_t literal,
 		default:
 			assert(false);
 		
+	}
+}
+
+bool
+type_compare(type_info_t a, type_info_t b)
+{
+	if (a.prim == b.prim && a.spec == b.spec &&
+		a.indirection == b.indirection) {
+		return true;		
+	} else {
+		return false;
 	}
 }
 
