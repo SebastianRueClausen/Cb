@@ -165,8 +165,7 @@ sym_global_t;
 /* points to a section of the symbol table */
 typedef struct sym_scope
 {
-	uint32_t				start;
-	uint32_t				end;
+	uint32_t				size;
 }
 sym_scope_t;
 

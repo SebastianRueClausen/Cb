@@ -858,16 +858,12 @@ parse_parameter_list(frontend_t *f)
 
 			/* anon identifier */
 			case TOK_COMMA:
+			case TOK_PAREN_CLOSED:
 				/* anonomous identifiers are allowed for function
 				 * declarations, but not function definitions,
 				 * we just set a null hash, and check for that later */	
 				param.hash = SYM_NULL_HASH;
 				break;
-
-			case TOK_PAREN_CLOSED:
-				param.hash = SYM_NULL_HASH;
-				lex_next_token(f);
-				return vec;
 
 			default:
 				// printf("token type: %s\n", lex_tok_debug_str(f->lex.curr_token.type));

@@ -9,13 +9,27 @@ deduct_prim(type_info_t *type, err_location_t *err_loc)
 {
 	assert(type->prim == TYPE_PRIM_NONE);
 
-	const type_spec_t is_int = TYPE_SPEC_UNSIGNED | TYPE_SPEC_SIGNED |
-							   TYPE_SPEC_SHORT	  | TYPE_SPEC_LONG;
-
-	if (type->spec & is_int) {
+	if (type->spec & TYPE_SPEC_UNSIGNED) {
 		type->prim = TYPE_PRIM_INT;
 		return;
 	}
+
+	if (type->spec & TYPE_SPEC_SIGNED) {
+		type->prim = TYPE_PRIM_INT;
+		return;
+	}
+
+	if (type->spec & TYPE_SPEC_SHORT) {
+		type->prim = TYPE_PRIM_INT;
+		return;
+	}
+
+	if (type->spec & TYPE_SPEC_LONG) {
+		type->prim = TYPE_PRIM_INT;
+		return;
+	}
+
+	type_print(*type);
 
 	syntax_error(*err_loc, "type specifier missing");			
 }

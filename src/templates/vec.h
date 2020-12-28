@@ -15,8 +15,6 @@ typedef struct
 }
 VEC_SIGNATURE;
 
-#include <stdio.h>
-
 static inline VEC_SIGNATURE
 TEMPLATE_SIGNATURE(VEC_SIGNATURE, create)(size_t capacity)
 {
@@ -42,9 +40,7 @@ static inline void
 TEMPLATE_SIGNATURE(VEC_SIGNATURE, reserve)(VEC_SIGNATURE *vec, size_t capacity)
 {
 	if (vec->capacity != capacity) {
-		printf("reserve new size : %lu\n", capacity * sizeof(VEC_TYPE));
 		vec->data = realloc(vec->data, capacity * sizeof(VEC_TYPE));
-		printf("reserve new size 2: %lu\n", capacity * sizeof(VEC_TYPE));
 		
 		if (capacity < vec->size) {
 			vec->size = capacity;
@@ -57,9 +53,8 @@ TEMPLATE_SIGNATURE(VEC_SIGNATURE, reserve)(VEC_SIGNATURE *vec, size_t capacity)
 static inline void
 TEMPLATE_SIGNATURE(VEC_SIGNATURE, resize)(VEC_SIGNATURE *vec, size_t size)
 {
-	if (vec->capacity < size) {
-		TEMPLATE_SIGNATURE(VEC_SIGNATURE, reserve)(vec, size);
-	}
+	/* only allow downsizeing for now */
+	assert(size < vec->size);
 
 	vec->size = size;
 }

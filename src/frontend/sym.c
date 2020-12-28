@@ -38,15 +38,10 @@ sym_push_scope(sym_table_t *table)
 {
 	sym_scope_t scope;
 
-	if (table->scopes.size == 0) {
-		printf("got here\n");
-		scope.start = 0;
-	} else {
-		scope.start = vec_sym_scope_t_top(&table->scopes).end;
-	}
+	scope.size = 0;
 
-	scope.end = scope.start;
-
+	printf("push scope count %lu\n", table->locals.size);
+	
 	vec_sym_scope_t_push(&table->scopes, scope);
 }
 
@@ -54,15 +49,16 @@ sym_push_scope(sym_table_t *table)
 void
 sym_pop_scope(sym_table_t *table)
 {
-	uint32_t new_top;
+	uint32_t new_top =
+		table->locals.size - vec_sym_scope_t_top(&table->scopes).size;
 
-	printf("pre\n");
-	new_top = vec_sym_scope_t_top(&table->scopes).start;
+	printf("pop scope count before %lu\n", table->local_hashes.size);
 
 	/* resize the entries */
 	vec_sym_local_t_resize(&table->locals, new_top);
 	vec_sym_hash_t_resize(&table->local_hashes, new_top);
-	printf("post\n");
+
+	printf("pop scope count after %lu\n", table->local_hashes.size);
 
 	/* pop the current scope */
 	vec_sym_scope_t_pop(&table->scopes);
@@ -142,9 +138,10 @@ sym_declare_global(sym_table_t *table, sym_global_t global, sym_hash_t hash, err
 	assert(table->scopes.size == 0);
 
 	id = sym_find_global(table, hash);
-	assert(id < 0);
+
 
 	if (id == SYM_ID_GLOBAL_NULL) {
+		global.defined = false;
 		return add_global(table, global, hash);	
 	}
 
@@ -191,7 +188,7 @@ sym_find_local(const sym_table_t *table, sym_hash_t hash)
 	sym_hash_t *current, *start, *end;
 
 	start = table->local_hashes.data - 1;
-	end = table->local_hashes.data + table->local_hashes.size;
+	end = table->local_hashes.data + table->local_hashes.size - 1;
 
 	/* loop through in reverse */
 	for (current = end; current != start; --current) {
@@ -212,10 +209,7 @@ add_local(sym_table_t *table, sym_local_t local, sym_hash_t hash)
 	assert(table->locals.size == table->local_hashes.size);
 
 	/* update current scope */
-	vec_sym_scope_t_top_ptr(&table->scopes)->end++;
-
-	printf("scope start = %u\n", vec_sym_scope_t_top(&table->scopes).start);
-	printf("scope end = %u\n", vec_sym_scope_t_top(&table->scopes).end);
+	vec_sym_scope_t_top_ptr(&table->scopes)->size++;
 
 	/* local id are positive */
 	return table->locals.size;
@@ -224,17 +218,36 @@ add_local(sym_table_t *table, sym_local_t local, sym_hash_t hash)
 sym_local_t*
 sym_get_local(sym_table_t *table, sym_id_t id)
 {
-	assert(id > 0);
+	assert(id >= 0);
 
-	return &table->locals.data[id];
+	return &table->locals.data[id - 1];
 }
+
+static sym_id_t
+search_current_scope(sym_table_t *table, sym_hash_t hash)
+{
+	sym_hash_t *current, *start, *end;
+
+	end = table->local_hashes.data + table->local_hashes.size - 1;
+	start = end - vec_sym_scope_t_top(&table->scopes).size;
+
+	/* loop through in reverse */
+	for (current = end; current != start; --current) {
+		if (*current == hash) {
+			return (current - start) + 1;
+		}
+	}
+
+	return SYM_ID_LOCAL_NULL;
+}
+
 
 /* @todo: you should be able to define a new variable by
  * same name in a deeper scope */
 sym_id_t
 sym_define_local(sym_table_t *table, sym_local_t local, sym_hash_t hash, err_location_t *err_loc)
 {
-	sym_id_t id = sym_find_local(table, hash);
+	sym_id_t id = search_current_scope(table, hash);
 
 	if (id != SYM_ID_LOCAL_NULL) {
 		syntax_error(*err_loc, "redefinition of variable");	

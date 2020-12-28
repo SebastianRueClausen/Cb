@@ -8,7 +8,21 @@ float f;
 
 int main(int argv, char ** argc)
 {
-	for (i = 0; i < argv; ++i) {
-		f = f * 2;				
+	{
+		int b;	
+		int a;
 	}
+	int b;
+
+	argv = argc- 1;
 }
+
+float test(signed short);
+
+
+float test(signed short u)
+{
+	while (u)
+		--u;
+}
+
