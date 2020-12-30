@@ -1,4 +1,5 @@
-#include "frontend.h"
+#include "f_parser.h"
+#include "f_lexer.h"
 
 #include <assert.h>
 #include <stdbool.h>
@@ -10,71 +11,6 @@
  * which make sure the syntax is correct, expression happen in the right
  * order and prepares the syntax for optimization and code generation.
  */
-
-#define DEBUG 1 
-
-#ifdef DEBUG
-
-static const char* ast_str[] =
-{	
-	"AST_UNDEF",
-	"AST_ADD",
-	"AST_MIN",
-	"AST_MUL",
-	"AST_DIV",
-	"AST_MOD",
-
-	"AST_EQUAL",
-	"AST_NOT_EQUAL",
-	"AST_LESSER",
-	"AST_GREATER",
-	"AST_LESSER_EQUAL",
-	"AST_GREATER_EQUAL",
-
-	"AST_UNARY_PLUS",
-	"AST_UNARY_MINUS",
-	"AST_UNARY_NOT",
-
-	"AST_BIT_NOT",
-
-	"AST_PRE_INCREMENT",
-	"AST_PRE_DECREMENT",
-
-	"AST_POST_INCREMENT",
-	"AST_POST_DECREMENT",
-
-	"AST_DEREF",
-	"AST_ADDRESS",
-
-	"AST_PROMOTE",
-
-	"AST_ASSIGN",
-
-	"AST_LITERAL",
-	
-	"AST_IF",
-	"AST_WHILE",
-
-	"AST_IDENTIFIER",
-
-	"AST_NOP"
-};
-
-const char*
-ast_to_str(ast_type_t type)
-{
-	return ast_str[type];
-}
-
-#else
-
-const char*
-ast_to_str(ast_type_t type)
-{
-	return "DEBUG";
-}
-
-#endif
 
 /* operation tokens used in expressions */
 /* @perforamce: make sections lign up with token type for farster,
@@ -123,18 +59,18 @@ is_rvalue(lex_token_type_t tok)
 	}
 }
 
-/* since the type info can be represented in different ways in ast nodes, 
+/* since the type info can be represented in different ways in ast nodes,
  * this function gets the right one dependent on ast_type */
 static type_info_t
-ast_get_type_info(frontend_t *f, ast_node_t *node)
+ast_get_type_info(parser_t *parser, ast_node_t *node)
 {
 	switch (node->type) {
 
 		case AST_LITERAL:
-			return node->literal.type;
+			return type_from_literal(node->literal);
 
 		case AST_IDENTIFIER:
-			return ((sym_global_t*)sym_get_entry(&f->sym_table, node->sym_id))->type;
+			return ((sym_global_t*)sym_get_entry(parser->sym_table, node->sym_id))->type;
 
 		/* we just assume its some other node as part of and expression,
 		 * or an unary node, in which case we also save
@@ -147,11 +83,11 @@ ast_get_type_info(frontend_t *f, ast_node_t *node)
 
 /* allocate and create ast node */
 inline static ast_node_t*
-make_ast_node(frontend_t *f, ast_type_t type,
+make_ast_node(parser_t *parser, ast_type_t type,
 			  ast_node_t *left, ast_node_t *center,
 			  ast_node_t *right)
 {
-	ast_node_t *node	= mem_pool_alloc(&f->pool, sizeof(ast_node_t));
+	ast_node_t *node	= mem_pool_alloc(&parser->pool, sizeof(ast_node_t));
 	node->left			= left;
 	node->center		= center;
 	node->right			= right;
@@ -162,14 +98,14 @@ make_ast_node(frontend_t *f, ast_type_t type,
 
 /* create an */
 inline static ast_node_t*
-make_rvalue_node(frontend_t *f, const lex_token_t *token)
+make_rvalue_node(parser_t *parser, const lex_token_t *token)
 {
 	ast_node_t *node;
 
 	switch (token->type) {
 
 		case TOK_LITERAL:
-			node = make_ast_node(f, AST_LITERAL, NULL, NULL, NULL);
+			node = make_ast_node(parser, AST_LITERAL, NULL, NULL, NULL);
 			node->literal.type = token->literal.type;
 			node->literal.value = token->literal.value;
 			break;
@@ -179,39 +115,39 @@ make_rvalue_node(frontend_t *f, const lex_token_t *token)
 			break;
 	}
 
-	node->value_type = AST_RVALUE;	
+	node->value_type = AST_RVALUE;
 
 	return node;
 }
 
 /* assumes the symbol already exists and creates a node */
 inline static ast_node_t*
-make_lvalue_node(frontend_t *f, const lex_token_t *token)
+make_lvalue_node(parser_t *parser, const lex_token_t *token)
 {
 	sym_id_t id;
 	ast_node_t *node;
 
-	id = sym_find_id(&f->sym_table, token->hash);
+	id = sym_find_id(parser->sym_table, token->hash);
 
 	/* sym will always be defined before we use it here */
 	if (id == SYM_ID_NULL) {
 		syntax_error(token->err_loc, "use of undeclared identifier");
 	}
 
-	node = make_ast_node(f, AST_IDENTIFIER, NULL, NULL, NULL);
+	node = make_ast_node(parser, AST_IDENTIFIER, NULL, NULL, NULL);
 	node->sym_id = id;
-	
+
 	return node;
 }
 
 /* helper function to create unary nodes */
 inline static ast_node_t*
-make_unary_node(frontend_t *f, ast_type_t type,
+make_unary_node(parser_t *parser, ast_type_t type,
 				ast_node_t *node, type_info_t type_info)
 {
 	ast_node_t *unary_node;
 
-	unary_node = make_ast_node(f, type, node, NULL, NULL);
+	unary_node = make_ast_node(parser, type, node, NULL, NULL);
 
 	/* the type may depent on the type of prefix */
 	unary_node->expr_type = type_info;
@@ -221,15 +157,15 @@ make_unary_node(frontend_t *f, ast_type_t type,
 
 /* parse function call, curr token must be on identifier */
 static ast_node_t*
-parse_function_call(frontend_t *f)
+parse_function_call(parser_t *parser)
 {
 	sym_global_t *func;
 
 	/* get current token */
-	lex_token_t token = f->lex.curr_token;
+	lex_token_t token = parser->lexer->curr_token;
 
 	/* find the symbol */
-	int32_t id = sym_find_id(&f->sym_table, token.hash);
+	int32_t id = sym_find_id(parser->sym_table, token.hash);
 
 	/* make sure that it's declared */
 	if (id == SYM_ID_NULL) {
@@ -237,7 +173,7 @@ parse_function_call(frontend_t *f)
 	}
 
 	/* get entry */
-	func = sym_get_global(&f->sym_table, id);
+	func = sym_get_global(parser->sym_table, id);
 
 	/* make sure its a function */
 	if (func->kind != SYM_GLOBAL_KIND_FUNCTION) {
@@ -245,46 +181,44 @@ parse_function_call(frontend_t *f)
 	}
 
 	/* skip identifier */
-	lex_next_token(f);
+	f_next_token(parser->lexer);
 
 	/* skip '(', we should not have to check */
-	lex_next_token(f);
+	f_next_token(parser->lexer);
 
 	/*  */
-	
+
 }
 
 /* peek at next token, and determine if it's a postfix, and
  * if it is we generate the ast tree, and skip the postfix,
  * otherwise return NULL */
 static ast_node_t*
-parse_postfix(frontend_t *f)
+parse_postfix(parser_t *parser)
 {
-	ast_node_t *node;
-
 	/* peek at next token */
-	lex_token_t token = f->lex.next_token;
+	lex_token_t token = parser->lexer->next_token;
 
 	switch (token.type) {
 
 		/* function call */
 		case TOK_PAREN_OPEN:
 
-			return parse_function_call(f);
+			return parse_function_call(parser);
 
 		/* post increment */
 		case TOK_INCREASE:
 
-			lex_next_token(f);
+			f_next_token(parser->lexer);
 
-			return make_ast_node(f, AST_POST_INCREMENT, NULL, NULL, NULL);
+			return make_ast_node(parser, AST_POST_INCREMENT, NULL, NULL, NULL);
 
 		/* post decrement */
 		case TOK_DECREASE:
 
-			lex_next_token(f);
+			f_next_token(parser->lexer);
 
-			return make_ast_node(f, AST_POST_DECREMENT, NULL, NULL, NULL);	
+			return make_ast_node(parser, AST_POST_DECREMENT, NULL, NULL, NULL);
 
 		/* member of struct/union */
 		case TOK_DOT:
@@ -302,10 +236,10 @@ parse_postfix(frontend_t *f)
 
 /* parses prefix and insures the next token is valid */
 static ast_node_t*
-parse_prefix(frontend_t *f)
+parse_prefix(parser_t *parser)
 {
 	ast_node_t *node = NULL;
-	lex_token_t token = f->lex.curr_token;
+	lex_token_t token = parser->lexer->curr_token;
 
 	/* remeber type to avoid doing lookup later */
 	type_info_t type = NULL_TYPE_INFO;
@@ -318,149 +252,149 @@ parse_prefix(frontend_t *f)
 		/* unary plus */
 		case TOK_PLUS:
 
-			token = lex_next_token(f);
+			token = f_next_token(parser->lexer);
 
 			if (token.type == TOK_IDENTIFIER) {
-				node = make_lvalue_node(f, &token);
-				type = ast_get_type_info(f, node);
+				node = make_lvalue_node(parser, &token);
+				type = ast_get_type_info(parser, node);
 			} else if (is_rvalue(token.type)) {
-				node = make_rvalue_node(f, &token);
-				type = node->literal.type;
+				node = make_rvalue_node(parser, &token);
+				type = type_from_literal(node->literal);
 			} else {
-				syntax_error(f->lex.last_token.err_loc,
+				syntax_error(parser->lexer->last_token.err_loc,
 						"unexpected operand for unary operator");
 			}
 
-			return make_unary_node(f, AST_UNARY_PLUS, node, type);
-	
+			return make_unary_node(parser, AST_UNARY_PLUS, node, type);
+
 
 		/* unary minus */
 		case TOK_MINUS:
 
-			token = lex_next_token(f);
+			token = f_next_token(parser->lexer);
 
 			if (token.type == TOK_IDENTIFIER) {
-				node = make_lvalue_node(f, &token);
-				type = ast_get_type_info(f, node);
+				node = make_lvalue_node(parser, &token);
+				type = ast_get_type_info(parser, node);
 			} else if (is_rvalue(token.type)) {
-				node = make_rvalue_node(f, &token);
-				type = node->literal.type;
+				node = make_rvalue_node(parser, &token);
+				type = type_from_literal(node->literal);
 			} else {
-				syntax_error(f->lex.last_token.err_loc,
+				syntax_error(parser->lexer->last_token.err_loc,
 						"unexpected operand for unary operator");
 			}
 
-			return make_unary_node(f, AST_UNARY_MINUS, node, type);
+			return make_unary_node(parser, AST_UNARY_MINUS, node, type);
 
 
 		/* unary not*/
 		case TOK_NOT:
 
-			token = lex_next_token(f);
+			token = f_next_token(parser->lexer);
 
 			if (token.type == TOK_IDENTIFIER) {
-				node = make_lvalue_node(f, &token);
-				type = ast_get_type_info(f, node);
+				node = make_lvalue_node(parser, &token);
+				type = ast_get_type_info(parser, node);
 			} else if (is_rvalue(token.type)) {
-				node = make_rvalue_node(f, &token);
-				type = node->literal.type;
+				node = make_rvalue_node(parser, &token);
+				type = type_from_literal(node->literal);
 			} else {
-				syntax_error(f->lex.last_token.err_loc,
+				syntax_error(parser->lexer->last_token.err_loc,
 						"unexpected operand for unary operator");
 			}
 
-			return make_unary_node(f, AST_UNARY_NOT, node, type);
+			return make_unary_node(parser, AST_UNARY_NOT, node, type);
 
 		/* bitwise not */
 		case TOK_NOT_BIT:
 
-			token = lex_next_token(f);
+			token = f_next_token(parser->lexer);
 
 			if (token.type == TOK_IDENTIFIER) {
-				node = make_lvalue_node(f, &token);
-				type = ast_get_type_info(f, node);
+				node = make_lvalue_node(parser, &token);
+				type = ast_get_type_info(parser, node);
 			} else if (is_rvalue(token.type)) {
-				node = make_rvalue_node(f, &token);
-				type = node->literal.type;
+				node = make_rvalue_node(parser, &token);
+				type = type_from_literal(node->literal);
 			} else {
-				syntax_error(f->lex.last_token.err_loc,
+				syntax_error(parser->lexer->last_token.err_loc,
 						"unexpected operand for unary operator");
 			}
 
-			return make_unary_node(f, AST_BIT_NOT, node, type);
-		
+			return make_unary_node(parser, AST_BIT_NOT, node, type);
+
 
 		/* pre increment */
 		case TOK_INCREASE:
 
-			token = lex_next_token(f);
+			token = f_next_token(parser->lexer);
 
 			if (token.type == TOK_IDENTIFIER) {
-				node = make_lvalue_node(f, &token);
-				type = ast_get_type_info(f, node);
+				node = make_lvalue_node(parser, &token);
+				type = ast_get_type_info(parser, node);
 			} else if (is_rvalue(token.type)) {
-				syntax_error(f->lex.last_token.err_loc,
+				syntax_error(parser->lexer->last_token.err_loc,
 						"r-value is not assignable");
 			} else {
-				syntax_error(f->lex.last_token.err_loc, "prefix error");
+				syntax_error(parser->lexer->last_token.err_loc, "prefix error");
 			}
 
-			return make_unary_node(f, AST_PRE_INCREMENT, node, type);
+			return make_unary_node(parser, AST_PRE_INCREMENT, node, type);
 
 
 		/* pre decrement */
 		case TOK_DECREASE:
 
-			token = lex_next_token(f);
+			token = f_next_token(parser->lexer);
 
 			if (token.type == TOK_IDENTIFIER) {
-				node = make_lvalue_node(f, &token);
-				type = ast_get_type_info(f, node);
+				node = make_lvalue_node(parser, &token);
+				type = ast_get_type_info(parser, node);
 			} else if (is_rvalue(token.type)) {
-				syntax_error(f->lex.last_token.err_loc,
+				syntax_error(parser->lexer->last_token.err_loc,
 						"r-value is not assignable");
 			} else {
-				syntax_error(f->lex.last_token.err_loc, "prefix error");
+				syntax_error(parser->lexer->last_token.err_loc, "prefix error");
 			}
-			
-			return make_unary_node(f, AST_PRE_DECREMENT, node, type);
+
+			return make_unary_node(parser, AST_PRE_DECREMENT, node, type);
 
 
 		/* address of */
 		case TOK_AMPERSAND:
 
 			/* skip '~' */
-			token = lex_next_token(f);
+			token = f_next_token(parser->lexer);
 
 			if (token.type == TOK_IDENTIFIER) {
-				node = make_lvalue_node(f, &token);
-				type = ast_get_type_info(f, node);
+				node = make_lvalue_node(parser, &token);
+				type = ast_get_type_info(parser, node);
 				/* always on more level of indirection */
 				++type.indirection;
 
 			} else if (is_rvalue(token.type)) {
-				syntax_error(f->lex.last_token.err_loc,
+				syntax_error(parser->lexer->last_token.err_loc,
 						"can not take address of rvalue");
 			} else {
-				syntax_error(f->lex.last_token.err_loc,
+				syntax_error(parser->lexer->last_token.err_loc,
 						"expected expression");
 			}
 
-			return make_unary_node(f, AST_ADDRESS, node, type);
+			return make_unary_node(parser, AST_ADDRESS, node, type);
 
 		/* derefrence */
 		case TOK_STAR:
 
 			/* skip '*' */
-			token = lex_next_token(f);
+			token = f_next_token(parser->lexer);
 
 			if (token.type == TOK_IDENTIFIER) {
-				node = make_lvalue_node(f, &token);
-				type = ast_get_type_info(f, node);
+				node = make_lvalue_node(parser, &token);
+				type = ast_get_type_info(parser, node);
 
 				/* make sure it's a pointer */
 				if (type.indirection == 0) {
-					syntax_error(f->lex.last_token.err_loc,
+					syntax_error(parser->lexer->last_token.err_loc,
 						"can not dereference non pointer");
 				}
 
@@ -468,14 +402,14 @@ parse_prefix(frontend_t *f)
 				--type.indirection;
 
 			} else if (is_rvalue(token.type)) {
-				syntax_error(f->lex.last_token.err_loc,
+				syntax_error(parser->lexer->last_token.err_loc,
 						"can not dereference rvalue");
 			} else {
-				syntax_error(f->lex.last_token.err_loc,
+				syntax_error(parser->lexer->last_token.err_loc,
 						"expected expression");
 			}
 
-			return make_unary_node(f, AST_DEREF, node, type);
+			return make_unary_node(parser, AST_DEREF, node, type);
 
 		default:
 			/* returns NULL if the prefix is invalid */
@@ -496,7 +430,7 @@ static const int ast_precedence[_AST_COUNT] =
 	[AST_ASSIGN]			= 1,
 
 	/* additive expression */
-	[AST_ADD]				= 2, 
+	[AST_ADD]				= 2,
 	[AST_MIN]				= 2,
 
 	/* multiplicative expression */
@@ -529,14 +463,14 @@ is_right_associavity(ast_type_t type)
 
 /* adapt types if required, or throw error if not compat */
 static void
-expr_type_check(frontend_t *f, ast_node_t **left,
+expr_type_check(parser_t *parser, ast_node_t **left,
 		   ast_node_t **right)
 {
 	type_compat_t compat;
 
 	/* we fetch the compatibility of the righ and left nodes */
-	compat = type_compat(ast_get_type_info(f, *left),
-						 ast_get_type_info(f, *right));
+	compat = type_compat(ast_get_type_info(parser, *left),
+						 ast_get_type_info(parser, *right));
 
 	/* we lookup what to do depent in compat */
 	switch (compat) {
@@ -549,17 +483,17 @@ expr_type_check(frontend_t *f, ast_node_t **left,
 		/* we promote the left or the right */
 		case TYPE_COMPAT_PROMOTE_LEFT:
 			printf("type widen left\n");
-			*left = make_ast_node(f, AST_PROMOTE, *left, NULL, NULL);
+			*left = make_ast_node(parser, AST_PROMOTE, *left, NULL, NULL);
 			break;
 
 		case TYPE_COMPAT_PROMOTE_RIGHT:
 			printf("type widen right\n");
-			*right = make_ast_node(f, AST_PROMOTE, *right, NULL, NULL);
+			*right = make_ast_node(parser, AST_PROMOTE, *right, NULL, NULL);
 			break;
 
 		/* if they are incompatible we throw a syntax error */
 		case TYPE_COMPAT_INCOMPAT:
-			syntax_error(f->lex.curr_token.err_loc,
+			syntax_error(parser->lexer->curr_token.err_loc,
 					"type incompatible in expression");
 			break;
 	}
@@ -568,7 +502,7 @@ expr_type_check(frontend_t *f, ast_node_t **left,
 /* recursive pratt parser */
 /* expect that the current token, is the first one of the expression */
 static ast_node_t*
-parse_expression(frontend_t *f, int32_t prev_prec,
+parse_expression(parser_t *parser, int32_t prev_prec,
 				 lex_token_type_t terminator)
 {
 	lex_token_t token, next_token;
@@ -577,18 +511,18 @@ parse_expression(frontend_t *f, int32_t prev_prec,
 	type_info_t expr_type;
 
 	/* get value token */
-	token = f->lex.curr_token;
+	token = parser->lexer->curr_token;
 
 	if (token.type == TOK_IDENTIFIER) {
-		left = make_lvalue_node(f, &token);
+		left = make_lvalue_node(parser, &token);
 	} else if (is_rvalue(token.type)) {
-		left = make_rvalue_node(f, &token);
+		left = make_rvalue_node(parser, &token);
 	} else if (token.type == TOK_PAREN_OPEN) {
-		lex_next_token(f);
-		left = parse_expression(f, 0, TOK_PAREN_CLOSED);
+		f_next_token(parser->lexer);
+		left = parse_expression(parser, 0, TOK_PAREN_CLOSED);
 	} else {
 		/* the only other valid option is a prefix */
-		left = parse_prefix(f);
+		left = parse_prefix(parser);
 
 		if (!left) {
 			syntax_error(token.err_loc, "failed parsing prefix");
@@ -599,17 +533,17 @@ parse_expression(frontend_t *f, int32_t prev_prec,
 
 	/* the type of the expression is the type of
 	 * the left node */
-	expr_type = ast_get_type_info(f, left);
+	expr_type = ast_get_type_info(parser, left);
 
 	/* get op token */
-	next_token = lex_next_token(f);
+	next_token = f_next_token(parser->lexer);
 	if (next_token.type == terminator) {
 		return left;
 	}
 
 	node_type = op_tok_to_ast(next_token.type);
 	if (!node_type) {
-		syntax_error(err_loc(&f->lex), "expected expression");
+		syntax_error(err_loc(parser->lexer), "expected expression");
 	}
 
 	/*
@@ -621,21 +555,21 @@ parse_expression(frontend_t *f, int32_t prev_prec,
 		   prev_prec == ast_precedence[node_type])) {
 
 		 /* parse the next part of expression */
-		lex_next_token(f);
-		right = parse_expression(f, ast_precedence[node_type], terminator);
+		f_next_token(parser->lexer);
+		right = parse_expression(parser, ast_precedence[node_type], terminator);
 
 		/* check type compat, and modify the type required */
-		expr_type_check(f, &left, &right);	
+		expr_type_check(parser, &left, &right);
 
 		/* we must handle assignment differently */
-		if (f->lex.curr_token.type == TOK_ASSIGN) {
+		if (parser->lexer->curr_token.type == TOK_ASSIGN) {
 
 			/* right must be an rvalue when assigning */
 			right->value_type = AST_RVALUE;
 
 			/* swap the right and left, so the right branch
 			 * will be generated first */
-			tmp		= left;	
+			tmp		= left;
 			left	= right;
 			right	= tmp;
 		} else {
@@ -646,24 +580,24 @@ parse_expression(frontend_t *f, int32_t prev_prec,
 			right->value_type = AST_LVALUE;
 		}
 
-		left = make_ast_node(f, node_type, left, NULL, right);
+		left = make_ast_node(parser, node_type, left, NULL, right);
 
 		/* we set the type of the expression */
 		left->expr_type = expr_type;
 
-		if (f->lex.curr_token.type == terminator) {
+		if (parser->lexer->curr_token.type == terminator) {
 			return left;
 		}
 
-		node_type = op_tok_to_ast(f->lex.curr_token.type);
+		node_type = op_tok_to_ast(parser->lexer->curr_token.type);
 		if (!node_type) {
-			syntax_error(f->lex.curr_token.err_loc,
+			syntax_error(parser->lexer->curr_token.err_loc,
 					"expected expression");
 		}
 	}
 
 	printf("exited expression with current token %s\n",
-			lex_tok_debug_str(f->lex.curr_token.type));
+			lex_tok_debug_str(parser->lexer->curr_token.type));
 
 	return left;
 }
@@ -692,25 +626,25 @@ tok_err_str(lex_token_type_t type)
 }
 
 inline static void
-assert_token(frontend_t *f, lex_token_type_t type)
+assert_token(parser_t *parser, lex_token_type_t type)
 {
-	if (f->lex.curr_token.type != type) {
-		syntax_error(f->lex.curr_token.err_loc, "expected '%s'",
+	if (parser->lexer->curr_token.type != type) {
+		syntax_error(parser->lexer->curr_token.err_loc, "expected '%s'",
 				tok_err_str(type));
 	}
 }
 
 /* parse single token, and throw error if different token is found */
 inline static void
-parse_token(frontend_t *f, lex_token_type_t type)
+parse_token(parser_t *parser, lex_token_type_t type)
 {
-	assert_token(f, type);
+	assert_token(parser, type);
 
-	lex_next_token(f);
+	f_next_token(parser->lexer);
 }
 
 static ast_node_t*
-parse_compound_statement(frontend_t *f);
+parse_compound_statement(parser_t *parser);
 
 /* asserts that we doesnt set a type prim more than once */
 inline static void
@@ -738,13 +672,13 @@ set_type_spec(type_info_t *type, type_spec_t spec,
 }
 
 static uint32_t
-parse_pointer_indirection(frontend_t *f)
+parse_pointer_indirection(parser_t *parser)
 {
-	lex_token_type_t type = f->lex.curr_token.type;
+	lex_token_type_t type = parser->lexer->curr_token.type;
 	uint32_t n = 0;
 
 	while (type == TOK_STAR) {
-		type = lex_next_token(f).type;
+		type = f_next_token(parser->lexer).type;
 		++n;
 	}
 
@@ -753,107 +687,107 @@ parse_pointer_indirection(frontend_t *f)
 
 /* parse a list of symbol specifier */
 static type_info_t
-parse_type(frontend_t *f)
+parse_type(parser_t *parser)
 {
 	type_info_t type = NULL_TYPE_INFO;
 
 	for (;;) {
-		switch (f->lex.curr_token.type) {
+		switch (parser->lexer->curr_token.type) {
 
 			/* primitives */
 			case TOK_KEY_INT:
 				set_type_prim(&type, TYPE_PRIM_INT,
-						&f->lex.curr_token.err_loc);
+						&parser->lexer->curr_token.err_loc);
 				break;
 
 			case TOK_KEY_FLOAT:
 				set_type_prim(&type, TYPE_PRIM_FLOAT,
-						&f->lex.curr_token.err_loc);
+						&parser->lexer->curr_token.err_loc);
 				break;
 
 			case TOK_KEY_CHAR:
 				set_type_prim(&type, TYPE_PRIM_CHAR,
-						&f->lex.curr_token.err_loc);
+						&parser->lexer->curr_token.err_loc);
 				break;
 
 			case TOK_KEY_DOUBLE:
 				set_type_prim(&type, TYPE_PRIM_DOUBLE,
-						&f->lex.curr_token.err_loc);
+						&parser->lexer->curr_token.err_loc);
 				break;
 
 			/* type specifiers */
 			case TOK_KEY_CONST:
 				set_type_spec(&type, TYPE_SPEC_CONST,
-						&f->lex.curr_token.err_loc);
+						&parser->lexer->curr_token.err_loc);
 				break;
 
 			case TOK_KEY_STATIC:
 				set_type_spec(&type, TYPE_SPEC_STATIC,
-						&f->lex.curr_token.err_loc);
+						&parser->lexer->curr_token.err_loc);
 				break;
 
 			case TOK_KEY_UNSIGNED:
 				set_type_spec(&type, TYPE_SPEC_UNSIGNED,
-						&f->lex.curr_token.err_loc);
+						&parser->lexer->curr_token.err_loc);
 				break;
 
 			case TOK_KEY_SIGNED:
 				set_type_spec(&type, TYPE_SPEC_SIGNED,
-						&f->lex.curr_token.err_loc);
+						&parser->lexer->curr_token.err_loc);
 				break;
 
 			case TOK_KEY_SHORT:
 				set_type_spec(&type, TYPE_SPEC_SHORT,
-						&f->lex.curr_token.err_loc);
+						&parser->lexer->curr_token.err_loc);
 				break;
 
 			case TOK_KEY_LONG:
 				set_type_spec(&type, TYPE_SPEC_LONG,
-						&f->lex.curr_token.err_loc);
+						&parser->lexer->curr_token.err_loc);
 				break;
 
 			case TOK_KEY_REGISTER:
 				set_type_spec(&type, TYPE_SPEC_REGISTER,
-						&f->lex.curr_token.err_loc);
+						&parser->lexer->curr_token.err_loc);
 				break;
 
 			case TOK_KEY_VOLATILE:
 				set_type_spec(&type, TYPE_SPEC_VOLATILE,
-						&f->lex.curr_token.err_loc);
+						&parser->lexer->curr_token.err_loc);
 				break;
 
 			case TOK_KEY_EXTERN:
 				set_type_spec(&type, TYPE_SPEC_EXTERN,
-						&f->lex.curr_token.err_loc);
+						&parser->lexer->curr_token.err_loc);
 				break;
 
 			default:
-				type.indirection = parse_pointer_indirection(f);
+				type.indirection = parse_pointer_indirection(parser);
 				return type;
 		}
 
-		lex_next_token(f);
+		f_next_token(parser->lexer);
 	}
 }
 
 /* expect to be on '(' */
 static vec_sym_param_t
-parse_parameter_list(frontend_t *f)
+parse_parameter_list(parser_t *parser)
 {
-	sym_param_t param;	
+	sym_param_t param;
 	vec_sym_param_t vec = vec_sym_param_t_create(4);
 
-	lex_next_token(f);
+	f_next_token(parser->lexer);
 
 	for (;;) {
-		param.type = parse_type(f);
-		param.err_loc = f->lex.curr_token.err_loc;
+		param.type = parse_type(parser);
+		param.err_loc = parser->lexer->curr_token.err_loc;
 
-		switch (f->lex.curr_token.type) {
+		switch (parser->lexer->curr_token.type) {
 
 			case TOK_IDENTIFIER:
-				param.hash = f->lex.curr_token.hash;
-				lex_next_token(f);
+				param.hash = parser->lexer->curr_token.hash;
+				f_next_token(parser->lexer);
 				break;
 
 			/* anon identifier */
@@ -861,123 +795,123 @@ parse_parameter_list(frontend_t *f)
 			case TOK_PAREN_CLOSED:
 				/* anonomous identifiers are allowed for function
 				 * declarations, but not function definitions,
-				 * we just set a null hash, and check for that later */	
+				 * we just set a null hash, and check for that later */
 				param.hash = SYM_NULL_HASH;
 				break;
 
 			default:
-				// printf("token type: %s\n", lex_tok_debug_str(f->lex.curr_token.type));
-				syntax_error(f->lex.curr_token.err_loc, "parameter unexpectet");
+				// printf("token type: %s\n", lex_tok_debug_str(parser->lexer->curr_token.type));
+				syntax_error(parser->lexer->curr_token.err_loc, "parameter unexpectet");
 				break;
 		}
 
-		type_check_validity(&param.type, &f->lex.last_token.err_loc);
+		type_check_validity(&param.type, &parser->lexer->last_token.err_loc);
 		vec_sym_param_t_push(&vec, param);
 
-		switch (f->lex.curr_token.type) {
+		switch (parser->lexer->curr_token.type) {
 			case TOK_COMMA:
-				lex_next_token(f);	
+				f_next_token(parser->lexer);
 				break;
 
 			case TOK_PAREN_CLOSED:
-				lex_next_token(f);
+				f_next_token(parser->lexer);
 				return vec;
 
 			default:
-				printf("token type: %s\n", lex_tok_debug_str(f->lex.curr_token.type));
-				syntax_error(f->lex.curr_token.err_loc, "parameter unexpectet");
+				printf("token type: %s\n", lex_tok_debug_str(parser->lexer->curr_token.type));
+				syntax_error(parser->lexer->curr_token.err_loc, "parameter unexpectet");
 				break;
 		}
 	}
 }
 
 static ast_node_t*
-parse_function(frontend_t *f, sym_global_t global, sym_hash_t hash)
+parse_function(parser_t *parser, sym_global_t global, sym_hash_t hash)
 {
-	global.function.params = parse_parameter_list(f);
+	global.function.params = parse_parameter_list(parser);
 
 	/* functiom definition */
-	if (f->lex.curr_token.type == TOK_BRACE_OPEN) {
+	if (parser->lexer->curr_token.type == TOK_BRACE_OPEN) {
 
 		sym_check_for_anon_params(&global.function.params);
-		
-		sym_define_global(&f->sym_table, global, hash, &f->lex.curr_token.err_loc);
+
+		sym_define_global(parser->sym_table, global, hash, &parser->lexer->curr_token.err_loc);
 
 		/* we shouldent have to check this, since there will be
 		 * a conflict if when we add the params to scope */
 		/* sym_check_for_duplicate_params(&global.function.params); */
 
 		/* enter function scope */
-		sym_push_scope(&f->sym_table);
+		sym_push_scope(parser->sym_table);
 
-		sym_add_params_to_scope(&f->sym_table, &global.function.params);
-	
+		sym_add_params_to_scope(parser->sym_table, &global.function.params);
+
 		/* @todo: implement parse_function_body */
-		return parse_compound_statement(f);
+		return parse_compound_statement(parser);
 	}
 	/* function declaration */
 	else {
 		sym_check_for_duplicate_params(&global.function.params);
 
-		sym_declare_global(&f->sym_table, global, hash, &f->lex.curr_token.err_loc);
+		sym_declare_global(parser->sym_table, global, hash, &parser->lexer->curr_token.err_loc);
 
-		parse_token(f, TOK_SEMIKOLON);
+		parse_token(parser, TOK_SEMIKOLON);
 		return NULL;
 	}
 }
 
 static ast_node_t*
-parse_global_declaration(frontend_t *f)
+parse_global_declaration(parser_t *parser)
 {
 	sym_global_t global;
 	sym_hash_t hash;
 
-	global.type = parse_type(f);
+	global.type = parse_type(parser);
 
-	type_check_validity(&global.type, &f->lex.curr_token.err_loc);
+	type_check_validity(&global.type, &parser->lexer->curr_token.err_loc);
 
-	hash = f->lex.curr_token.hash;
+	hash = parser->lexer->curr_token.hash;
 
-	parse_token(f, TOK_IDENTIFIER);
+	parse_token(parser, TOK_IDENTIFIER);
 
-	switch (f->lex.curr_token.type) {
+	switch (parser->lexer->curr_token.type) {
 
 		/* def of global var */
 		case TOK_ASSIGN:
 
 			/* @todo: add some kind of compile time expression parser */
-			parse_expression(f, 0, TOK_SEMIKOLON);
+			parse_expression(parser, 0, TOK_SEMIKOLON);
 
-			global.val.val_int = 0;
+			global.val._int = 0;
 			global.kind = SYM_GLOBAL_KIND_VARIABLE;
 
-			sym_define_global(&f->sym_table, global, hash, &f->lex.curr_token.err_loc);
+			sym_define_global(parser->sym_table, global, hash, &parser->lexer->curr_token.err_loc);
 
-			lex_next_token(f);			
+			f_next_token(parser->lexer);
 			return NULL;
 
 		/* decl of global var */
 		case TOK_SEMIKOLON:
 			global.kind = SYM_GLOBAL_KIND_VARIABLE;
-			sym_declare_global(&f->sym_table, global, hash, &f->lex.curr_token.err_loc);
+			sym_declare_global(parser->sym_table, global, hash, &parser->lexer->curr_token.err_loc);
 
-			lex_next_token(f);
+			f_next_token(parser->lexer);
 			return NULL;
 
 		/* def or decl of function */
 		case TOK_PAREN_OPEN:
 			global.kind = SYM_GLOBAL_KIND_FUNCTION;
-			return parse_function(f, global, hash);
+			return parse_function(parser, global, hash);
 
 		default:
-			syntax_error(f->lex.curr_token.err_loc, "missing semikolon");
+			syntax_error(parser->lexer->curr_token.err_loc, "missing semikolon");
 			return NULL;
 	}
 }
 
 /* called when we get a type specifier token */
 static ast_node_t*
-parse_local_definition(frontend_t *f)
+parse_local_definition(parser_t *parser)
 {
 	sym_id_t id;
 	sym_hash_t hash;
@@ -985,152 +919,152 @@ parse_local_definition(frontend_t *f)
 	ast_node_t *right, *left;
 
 	/* loops through type specifiers */
-	local.type = parse_type(f);
+	local.type = parse_type(parser);
 	local.kind = SYM_LOCAL_KIND_VARIABLE;
 
 	/* check for conflicts */
-	type_check_validity(&local.type, &f->lex.curr_token.err_loc);	
+	type_check_validity(&local.type, &parser->lexer->curr_token.err_loc);
 
-	hash = f->lex.curr_token.hash;
+	hash = parser->lexer->curr_token.hash;
 
 	/* the next token after specifiers must be an identifier */
-	parse_token(f, TOK_IDENTIFIER);
+	parse_token(parser, TOK_IDENTIFIER);
 
-	id = sym_define_local(&f->sym_table, local, hash, &f->lex.curr_token.err_loc);
+	id = sym_define_local(parser->sym_table, local, hash, &parser->lexer->curr_token.err_loc);
 
 	/* check for inline assignment and functions and such */
-	switch (f->lex.curr_token.type) {
+	switch (parser->lexer->curr_token.type) {
 
 		/* inline assignment */
 		case TOK_ASSIGN:
 
-			lex_next_token(f);
+			f_next_token(parser->lexer);
 
 			/* make an identifier ast node */
-			right = make_ast_node(f, AST_IDENTIFIER, NULL, NULL, NULL);
+			right = make_ast_node(parser, AST_IDENTIFIER, NULL, NULL, NULL);
 			right->sym_id = id;
 
 			/* parse the expression */
-			left = parse_expression(f, 0, TOK_SEMIKOLON);
+			left = parse_expression(parser, 0, TOK_SEMIKOLON);
 
 			/* skip semikolon */
-			lex_next_token(f);
+			f_next_token(parser->lexer);
 
 			/* glue together expression */
-			left = make_ast_node(f, AST_ASSIGN, left, NULL, right);
+			left = make_ast_node(parser, AST_ASSIGN, left, NULL, right);
 
 			return left;
 
 		case TOK_SEMIKOLON:
-			lex_next_token(f);
-			
-			return NULL;
-			
+			f_next_token(parser->lexer);
 
-		/* undeclared  */	
+			return NULL;
+
+
+		/* undeclared  */
 		default:
-			syntax_error(f->lex.curr_token.err_loc, "expected semikolon");
+			syntax_error(parser->lexer->curr_token.err_loc, "expected semikolon");
 			return NULL;
 	}
 }
 
 static ast_node_t*
-parse_else_statement(frontend_t *f)
+parse_else_statement(parser_t *parser)
 {
-	lex_next_token(f);
-	return parse_statement(f);
+	f_next_token(parser->lexer);
+	return parse_statement(parser);
 }
 
 static ast_node_t*
-parse_if_statement(frontend_t *f)
+parse_if_statement(parser_t *parser)
 {
 	ast_node_t *condition_ast, *true_ast, *false_ast;
 
 	/* skip 'if' token */
-	lex_next_token(f);
+	f_next_token(parser->lexer);
 
 	/* skip opening '(' */
-	parse_token(f, TOK_PAREN_OPEN);
+	parse_token(parser, TOK_PAREN_OPEN);
 
 	/* parse conditional expression */
-	condition_ast = parse_expression(f, 0, TOK_PAREN_CLOSED);
+	condition_ast = parse_expression(parser, 0, TOK_PAREN_CLOSED);
 
 	/* skip closing ')' */
-	lex_next_token(f);
+	f_next_token(parser->lexer);
 
 	/* parse the body */
-	true_ast = parse_statement(f);
+	true_ast = parse_statement(parser);
 
-	if (f->lex.curr_token.type == TOK_KEY_ELSE) {
-		lex_next_token(f);
-		false_ast = parse_else_statement(f);
+	if (parser->lexer->curr_token.type == TOK_KEY_ELSE) {
+		f_next_token(parser->lexer);
+		false_ast = parse_else_statement(parser);
 	}
 	else {
 		false_ast = NULL;
 	}
 
-	return make_ast_node(f, AST_IF, condition_ast, true_ast, false_ast);
+	return make_ast_node(parser, AST_IF, condition_ast, true_ast, false_ast);
 }
 
 static ast_node_t*
-parse_while_loop(frontend_t *f)
+parse_while_loop(parser_t *parser)
 {
 	ast_node_t *condition_ast, *body_ast;
 
-	/* skip 'while' token */	
-	lex_next_token(f);
+	/* skip 'while' token */
+	f_next_token(parser->lexer);
 
 	/* skip the '(' */
-	parse_token(f, TOK_PAREN_OPEN);
+	parse_token(parser, TOK_PAREN_OPEN);
 
 	/* parse the conditional */
-	condition_ast = parse_expression(f, 0, TOK_PAREN_CLOSED);
+	condition_ast = parse_expression(parser, 0, TOK_PAREN_CLOSED);
 
 	/* skip closing ')' */
-	lex_next_token(f);
+	f_next_token(parser->lexer);
 
 	/* parse the body */
-	body_ast = parse_statement(f);
+	body_ast = parse_statement(parser);
 
 	/* glue body and conditional together with a while ast */
-	return make_ast_node(f, AST_WHILE, condition_ast, NULL, body_ast);
+	return make_ast_node(parser, AST_WHILE, condition_ast, NULL, body_ast);
 
 }
 
 static ast_node_t*
-parse_for_loop(frontend_t *f)
+parse_for_loop(parser_t *parser)
 {
 	ast_node_t *tree, *body, *cond, *pre_op, *post_op;
 
 	/* skip opening 'for' token */
-	lex_next_token(f);
+	f_next_token(parser->lexer);
 
 	/* skip the '(' */
-	parse_token(f, TOK_PAREN_OPEN);
+	parse_token(parser, TOK_PAREN_OPEN);
 
 	/* parse preop expression */
-	pre_op = parse_expression(f, 0, TOK_SEMIKOLON);
-	lex_next_token(f);
+	pre_op = parse_expression(parser, 0, TOK_SEMIKOLON);
+	f_next_token(parser->lexer);
 
 	/* parse conditional statement */
-	cond = parse_expression(f, 0, TOK_SEMIKOLON);
-	lex_next_token(f);
+	cond = parse_expression(parser, 0, TOK_SEMIKOLON);
+	f_next_token(parser->lexer);
 
-	/* parse post op */	
-	post_op = parse_expression(f, 0, TOK_PAREN_CLOSED);
-	lex_next_token(f);
+	/* parse post op */
+	post_op = parse_expression(parser, 0, TOK_PAREN_CLOSED);
+	f_next_token(parser->lexer);
 
 	/* parse statement */
-	body = parse_statement(f);
+	body = parse_statement(parser);
 
-	/* glue the body and post op so we does the postop after the body */	
-	tree = make_ast_node(f, AST_NOP, body, NULL, post_op);
+	/* glue the body and post op so we does the postop after the body */
+	tree = make_ast_node(parser, AST_NOP, body, NULL, post_op);
 
 	/* we make a while loop with the body and cond */
-	tree = make_ast_node(f, AST_WHILE, cond, NULL, tree);
+	tree = make_ast_node(parser, AST_WHILE, cond, NULL, tree);
 
 	/* glue the preop and while loop so we does the preop before the loop */
-	tree = make_ast_node(f, AST_NOP, pre_op, NULL, tree);
+	tree = make_ast_node(parser, AST_NOP, pre_op, NULL, tree);
 
 	return tree;
 }
@@ -1138,9 +1072,9 @@ parse_for_loop(frontend_t *f)
 /* creates an ast tree from a single statement, which can include compound statements */
 /* expect the current token to be the first of the statement */
 ast_node_t*
-parse_statement(frontend_t *f)
+parse_statement(parser_t *parser)
 {
-	lex_token_t token = f->lex.curr_token;
+	lex_token_t token = parser->lexer->curr_token;
 	ast_node_t *tree;
 
 	/* we sholdnt have to have to enter a new scope
@@ -1149,13 +1083,13 @@ parse_statement(frontend_t *f)
 
 	switch (token.type) {
 		case TOK_KEY_IF:
-			return parse_if_statement(f);
+			return parse_if_statement(parser);
 
 		case TOK_KEY_FOR:
-			return parse_for_loop(f);
+			return parse_for_loop(parser);
 
 		case TOK_KEY_WHILE:
-			return parse_while_loop(f);
+			return parse_while_loop(parser);
 
 		case TOK_KEY_ELSE:
 			syntax_error(token.err_loc, "no maching if statement");
@@ -1163,9 +1097,9 @@ parse_statement(frontend_t *f)
 
 		case TOK_BRACE_OPEN:
 			/* we enter a new scope */
-			sym_push_scope(&f->sym_table);
+			sym_push_scope(parser->sym_table);
 
-			return parse_compound_statement(f);
+			return parse_compound_statement(parser);
 
 		case TOK_KEY_INT:
 		case TOK_KEY_SHORT:
@@ -1179,13 +1113,13 @@ parse_statement(frontend_t *f)
 		case TOK_KEY_CONST:
 		case TOK_KEY_LONG:
 		case TOK_KEY_EXTERN:
-			return parse_local_definition(f);
+			return parse_local_definition(parser);
 
 		default:
-			tree = parse_expression(f, 0, TOK_SEMIKOLON);
+			tree = parse_expression(parser, 0, TOK_SEMIKOLON);
 
 			/* skip semikolon */
-			lex_next_token(f);
+			f_next_token(parser->lexer);
 
 			return tree;
 	}
@@ -1193,54 +1127,69 @@ parse_statement(frontend_t *f)
 
 /* loops through all statements in a compound statement and creates an ast tree */
 static ast_node_t*
-parse_compound_statement(frontend_t *f)
+parse_compound_statement(parser_t *parser)
 {
 	ast_node_t *left = NULL, *tree = NULL;
 
 	/* skip opening '{', shouldnt have to check */
-	lex_next_token(f);
+	f_next_token(parser->lexer);
 
 	/* parse all statements until we get a closed brace */
 	for (;;) {
-		if (f->lex.curr_token.type == TOK_BRACE_CLOSED) {
+		if (parser->lexer->curr_token.type == TOK_BRACE_CLOSED) {
 			/* skip closing '}' */
-			lex_next_token(f);
+			f_next_token(parser->lexer);
 
 			/* leave current scope */
-			sym_pop_scope(&f->sym_table);
+			sym_pop_scope(parser->sym_table);
 
 			return left;
 		}
 
 		/* parse_statement mat call parse_comound_statement,
 		 * so it is called recursively in nested comound statements */
-		tree = parse_statement(f);
-		
+		tree = parse_statement(parser);
+
 		if (tree) {
 			/* if its the first statement */
 			if (!left) {
 				left = tree;
 			} else {
 				/* glue together with prev statements */
-				left = make_ast_node(f, AST_NOP, left, NULL, tree);
+				left = make_ast_node(parser, AST_NOP, left, NULL, tree);
 			}
 		}
 	}
 }
 
 static ast_node_t*
-parse_function_body(frontend_t *f)
+parse_function_body(parser_t *parser)
 {
 
 }
-/* ===================================================================== */
-/*  ============================ PUBLIC =============================== */
-/* ===================================================================== */
+
+
+
+void
+f_create_parser(parser_t *parser, lexer_t *lexer, sym_table_t *table)
+{
+	parser->lexer		= lexer;
+	parser->sym_table	= table;
+	parser->pool		= mem_pool_create(1024);
+}
+
+
+void
+f_destroy_parser(parser_t *parser)
+{
+	mem_pool_destroy(&parser->pool);
+}
+
 
 ast_node_t*
-ast_parse(frontend_t *f)
+f_generate_ast(parser_t *parser)
 {
-	lex_token_t token = f->lex.curr_token;
+	lex_token_t token = parser->lexer->curr_token;
 	ast_node_t* function;
 
 	for (;;) {
@@ -1258,7 +1207,8 @@ ast_parse(frontend_t *f)
 			case TOK_KEY_CONST:
 			case TOK_KEY_LONG:
 			case TOK_KEY_EXTERN:
-				function = parse_global_declaration(f);
+
+				function = parse_global_declaration(parser);
 
 				if (function) {
 					return function;
@@ -1270,62 +1220,10 @@ ast_parse(frontend_t *f)
 				return NULL;
 
 			default:
-				printf("parsing token: %s\n", lex_tok_debug_str(token.type));
-				syntax_error(f->lex.curr_token.err_loc, "failure parsing");
+				// printf("parsing token: %s\n", lex_tok_debug_str(token.type));
+				printf("got here\n");
+				syntax_error(parser->lexer->curr_token.err_loc, "failure parsing");
 		}
 	}
-	
-}
-
-/* @debug: make this easier to read in the console */
-void
-ast_print_tree(ast_node_t *node, uint32_t level)
-{
-	uint32_t i;
-
-	++level;
-	printf("%s\n", ast_to_str(node->type));
-	if (node->left) {
-		for (i = 0; i < level; ++i) {
-			printf("\t");
-		}
-		ast_print_tree(node->left, level);			
-	}
-	
-	if (node->center) {
-		for (i = 0; i < level; ++i) {
-			printf("\t");
-		}
-		ast_print_tree(node->center, level);			
-	}
-
-	if (node->right) {
-		for (i = 0; i < level; ++i) {
-			printf("\t");
-		}
-		ast_print_tree(node->right, level);
-	}
-}
-
-void
-ast_print_tree_postorder(ast_node_t *node)
-{
-	if (!node) {
-		return;
-	}
-
-	if (node->left) {
-		ast_print_tree_postorder(node->left);
-	}
-
-	if (node->center) {
-		ast_print_tree_postorder(node->center);
-	}
-
-	if (node->right) {
-		ast_print_tree_postorder(node->right);
-	}
-
-	printf("%s\n", ast_to_str(node->type));
 
 }

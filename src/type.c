@@ -1,4 +1,4 @@
-#include "frontend.h"
+#include "type.h"
 
 #include <stdbool.h>
 #include <stdio.h>
@@ -146,89 +146,53 @@ type_compat(type_info_t left, type_info_t right)
 	return TYPE_COMPAT_COMPAT;
 }
 
-type_info_t
-type_deduct_from_literal(type_literal_value_t lit,
-						 type_literal_type_t lit_type)
-{
-	type_info_t type = NULL_TYPE_INFO;
-
-	type.indirection = 0;
-	type.spec = 0;
-
-	switch (lit_type) {
-		
-		case TYPE_LIT_INT:
-			/* we make it a u32 or u64 dependent on size */
-			type.prim = TYPE_PRIM_INT;
-
-			if (lit.val_int > UINT32_MAX) {
-				type.spec |= TYPE_SPEC_LONG;
-			}
-
-			/* @todo: add check for overflow */
-
-			/* always unsigned since a literal can't have a signed value */
-			type.spec |= TYPE_SPEC_SIGNED;
-			
-			return type;
-
-		case TYPE_LIT_FLOAT:
-
-			/* we always make it a double */
-			type.prim = TYPE_PRIM_DOUBLE;
-			return type;
-
-		case TYPE_LIT_STRING:
-			type.prim = TYPE_PRIM_CHAR;
-			/* should this be const?? */
-			type.spec = TYPE_SPEC_CONST;
-			type.indirection = 1;
-			return type;
-
-	}
-}
-
 /* should already be checked that the suffix and literal are compat, 
  * we just change the type of the literal so it matches the suffix */
-type_info_t
-type_adapt_to_suffix(type_info_t suffix, type_info_t literal,
-					 err_location_t err_loc)
+void
+type_adapt_to_suffix(literal_t *literal, suffix_flags_t flags, err_location_t err_loc)
 {
 
-	switch (literal.prim) {
+	switch (literal->type) {
 
 		/* we always set a literal as double if it's a floating point */
-		case TYPE_PRIM_DOUBLE:
+		case LITERAL_TYPE_DOUBLE:
 
-			if (suffix.spec & TYPE_SPEC_UNSIGNED) {
+			if (flags & SUFFIX_UNSIGNED) {
 				syntax_error(err_loc, "invalid suffix 'unsigned' for "
 									   "floating point literal");
 			}
 
-			if (suffix.spec & TYPE_SPEC_LONG) {
+			if (flags & SUFFIX_LONG) {
 				syntax_error(err_loc, "invalid suffix 'long' for "
 									    "floating point literal");
 			}
-			
-			return literal;
 
-		case TYPE_PRIM_INT:
+			break;
+
+		case LITERAL_TYPE_INT:
 			/* should always be unsigned */
 
-			if (suffix.prim == TYPE_PRIM_DOUBLE) {
+			if (flags & SUFFIX_FLOAT) {
 				syntax_error(err_loc, "invalid suffix 'float' for "
 									   "integer literal");
 			}
 
-			if (suffix.spec & TYPE_SPEC_LONG) {
-				literal.spec |= TYPE_SPEC_LONG;
+			if (flags & SUFFIX_LONG) {
+				literal->type = LITERAL_TYPE_LONG;
 			}
+			
+			break;
 
-			return literal;
+		case LITERAL_TYPE_LONG:
+			if (flags & SUFFIX_FLOAT) {
+				syntax_error(err_loc, "invalid suffix 'float' for "
+									   "integer literal");
+			}
+			break;
+
 
 		default:
 			assert(false);
-		
 	}
 }
 
@@ -240,6 +204,34 @@ type_compare(type_info_t a, type_info_t b)
 		return true;		
 	} else {
 		return false;
+	}
+}
+
+type_info_t
+type_from_literal(literal_t literal)
+{
+	type_info_t type = NULL_TYPE_INFO;
+
+	switch (literal.type) {
+		case LITERAL_TYPE_DOUBLE:
+			type.prim = TYPE_PRIM_DOUBLE;
+			return type;
+
+		case LITERAL_TYPE_INT:
+			type.prim = TYPE_PRIM_INT;
+			type.spec |= TYPE_SPEC_UNSIGNED;
+			return type;
+
+		case LITERAL_TYPE_LONG:
+			type.prim = TYPE_PRIM_INT;
+			type.spec |= TYPE_SPEC_UNSIGNED;
+			type.spec |= TYPE_SPEC_LONG;
+			return type;
+
+		case LITERAL_TYPE_STR:
+			type.prim = TYPE_PRIM_CHAR;
+			type.indirection = 1;
+			return type;
 	}
 }
 

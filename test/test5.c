@@ -12,17 +12,18 @@ int main(int argv, char ** argc)
 		int b;	
 		int a;
 	}
+
 	int b;
 
-	argv = argc- 1;
+	argv = argc - 1;
 }
 
-float test(signed short);
+float test(signed short, float);
 
 
-float test(signed short u)
+float test(signed short u, float s)
 {
-	while (u)
+	while (s)
 		--u;
 }
 

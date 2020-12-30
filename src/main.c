@@ -1,9 +1,11 @@
-#include "frontend/frontend.h"
-#include "backend/ssa.h"
+#include "f_lexer.h"
+#include "f_parser.h"
+#include "f_ast.h"
 
 #include <stdio.h>
 #include <assert.h>
 
+#if 0
 // run the lexer on a list of tokens
 static void
 run_test1()
@@ -106,31 +108,38 @@ run_test3()
 	lex_destroy_instance(&lex_in);
 }
 
+#endif
+
 int main()
 {
-	frontend_t frontend;
 	ast_node_t *tree;
 
-	frontend_create(&frontend, "../test/test5.c");
+	sym_table_t table;
+	lexer_t lexer;
+	parser_t parser;
 
-	lex_next_token(&frontend);
+	sym_create_table(&table, 32);
+	f_create_lexer(&lexer, "../test/test5.c");
+	f_create_parser(&parser, &lexer, &table);
 
-	tree = ast_parse(&frontend);
+	printf("%i\n", f_next_token(&lexer).type);
+
+	printf("line %u\n", lexer.col);
+
+	tree = f_generate_ast(&parser);
 
 	while (tree) {
 
 		printf("== FUNC ==\n");
-		ast_print_tree(tree, 0);
+		f_print_ast(tree, 0);
 		printf("\n");
 	
-		tree = ast_parse(&frontend);
+		tree = f_generate_ast(&parser);
 	}
 
-	tree = parse_statement(&frontend); 
-
-	ast_print_tree(tree, 0);
-
-	frontend_destroy(&frontend);
+	sym_destroy_table(&table);
+	f_destroy_lexer(&lexer);
+	f_destroy_parser(&parser);
 
 	return 0;
 }

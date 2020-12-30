@@ -1,4 +1,6 @@
-#include "frontend.h"
+#include "f_lexer.h"
+#include "type.h"
+#include "mem.h"
 
 #include <assert.h>
 #include <ctype.h>
@@ -9,8 +11,6 @@
 /*
  * parses the raw text into tokens
  */
-
-/* @note: should the static functions also take a frontend_t? */
 
 static const char *tok_debug_str[_TOK_COUNT] = {
 	"TOK_UNKNOWN",
@@ -205,7 +205,7 @@ lex_tok_str(enum lex_token_type type)
 /* moves the curr pointer by 1, and returns the char
  * also updates the position */
 static char
-next(lex_instance_t *in)
+next(lexer_t *in)
 {
 	char c;
 
@@ -226,7 +226,7 @@ next(lex_instance_t *in)
 }
 
 static void
-skip(lex_instance_t *in, uint32_t n)
+skip(lexer_t *in, uint32_t n)
 {
 	uint32_t i;
 	for (i = 0; i < n; ++i) {
@@ -235,7 +235,7 @@ skip(lex_instance_t *in, uint32_t n)
 }
 
 static char
-skip_single_line_comment(lex_instance_t *in)
+skip_single_line_comment(lexer_t *in)
 {
 	char c = *in->curr;
 
@@ -248,7 +248,7 @@ skip_single_line_comment(lex_instance_t *in)
 }
 
 static char
-skip_multi_line_comment(lex_instance_t *in)
+skip_multi_line_comment(lexer_t *in)
 {
 	// skip opening /*
 	skip(in, 2);
@@ -268,7 +268,7 @@ skip_multi_line_comment(lex_instance_t *in)
 }
 
 static char
-skip_whitespace_and_comments(lex_instance_t *in)
+skip_whitespace_and_comments(lexer_t *in)
 {
 	for (;;) {
 		switch (*in->curr) {
@@ -297,7 +297,7 @@ skip_whitespace_and_comments(lex_instance_t *in)
 }
 
 static int
-word_len(const lex_instance_t *in)
+word_len(const lexer_t *in)
 {
 	uint32_t i = 0;
 	const char *str = in->curr;
@@ -314,7 +314,7 @@ word_len(const lex_instance_t *in)
 }
 
 static int
-number_len(const lex_instance_t *in)
+number_len(const lexer_t *in)
 {
 	uint32_t i = 0;
 	const char *str = in->curr;
@@ -331,7 +331,7 @@ number_len(const lex_instance_t *in)
 }
 
 static uint32_t
-string_len(const lex_instance_t *in)
+string_len(const lexer_t *in)
 {
 	uint32_t i = 0;
 	const char *str = in->curr;
@@ -348,7 +348,7 @@ string_len(const lex_instance_t *in)
 }
 
 static uint32_t
-char_len(const lex_instance_t *in)
+char_len(const lexer_t *in)
 {
 	uint32_t i = 0, slashes = 0;
 	const char *str = in->curr;
@@ -376,61 +376,62 @@ char_len(const lex_instance_t *in)
 	return 0;
 }
 
-#define MAX_SUFFIX_LEN 2
-
-static type_info_t
-parse_suffix(lex_instance_t *lex_in, uint32_t len)
+static suffix_flags_t
+parse_suffix(lexer_t *lexer, uint32_t len)
 {
-	struct type_info type = NULL_TYPE_INFO;
+	suffix_flags_t flags = 0;
+	uint32_t i;
 
 	if (len > MAX_SUFFIX_LEN) {
-		syntax_error(err_loc(lex_in), "invalid suffix");
+		syntax_error(err_loc(lexer), "invalid suffix");
 	}
 
-	switch (tolower(*lex_in->curr)) {
-		case 'u':
-			type.spec |= TYPE_SPEC_UNSIGNED;
-
-			if (len == 2) {
-				if (tolower(lex_in->curr[1]) == 'l') {
-					type.spec &= TYPE_SPEC_LONG;
+	for (i = 0; i < len; ++i) {
+		switch (tolower(*lexer->curr)) {
+			case 'u':
+				if (flags & SUFFIX_UNSIGNED) {
+					syntax_error(err_loc(lexer), "invalid suffix");
 				} else {
-					syntax_error(err_loc(lex_in), "invalid suffix");
+					flags |= SUFFIX_UNSIGNED;
 				}
-			}
-			break;
+				break;
 
-		case 'l':
-			type.spec |= TYPE_SPEC_LONG;
-
-			if (len == 2) {
-				if (tolower(lex_in->curr[1]) == 'u') {
-					type.spec &= TYPE_SPEC_UNSIGNED;
+			case 'l':
+				if (flags & SUFFIX_LONG) {
+					syntax_error(err_loc(lexer), "invalid suffix");
 				} else {
-					syntax_error(err_loc(lex_in), "invalid suffix");
+					flags |= SUFFIX_LONG;
 				}
-			}
-			break;
+				break;
 
-		case 'f':
-			type.prim = TYPE_PRIM_DOUBLE;
+			case 'f':
+				if (flags & SUFFIX_FLOAT) {
+					syntax_error(err_loc(lexer), "invalid suffix");
+				} else {
+					flags |= SUFFIX_FLOAT;
+				}
+				break;
 
-			if (len == 2) {
-				syntax_error(err_loc(lex_in), "invalid suffix");
-			}
-			break;
-
-		default:
-			syntax_error(err_loc(lex_in), "invalid suffix");
-			break;
+			default:
+				syntax_error(err_loc(lexer), "invalid suffix");
+				break;
+		}
 	}
 
-	return type;
+	/* check for conflicts */
+	if (flags & SUFFIX_UNSIGNED || flags & SUFFIX_LONG) {
+		if (flags & SUFFIX_FLOAT) {
+			syntax_error(err_loc(lexer), "invalid suffix");
+		}
+	}
+
+	return flags;
 }
 
-static type_literal_type_t
-parse_decimal_constant(const char *str, uint32_t len, uint64_t *val)
+static literal_t
+parse_decimal_constant(const char *str, uint32_t len)
 {
+	literal_t literal;
 	uint32_t i = 0;
 	int64_t tmp	= 0;
 	double d_tmp = 0, k = 0.1;
@@ -441,8 +442,11 @@ parse_decimal_constant(const char *str, uint32_t len, uint64_t *val)
 	}
 
 	if (str[i] != '.') {
-		*val = tmp;
-		return TYPE_LIT_INT;
+		literal.value._int = tmp;
+		/* @todo: check for size and dertermine if its 32 or 64 bit */
+		literal.type = LITERAL_TYPE_LONG;
+
+		return literal;
 	}
 
 	++i;
@@ -454,13 +458,16 @@ parse_decimal_constant(const char *str, uint32_t len, uint64_t *val)
 		++i;
 	}
 
-	*((double *)val) = d_tmp;
-	return TYPE_LIT_FLOAT;
+	literal.value._float = d_tmp;
+	literal.type = LITERAL_TYPE_DOUBLE;
+
+	return literal;
 }
 
-static type_literal_type_t
+static literal_t
 parse_octal_constant(const char *str, uint32_t len, uint64_t *val)
 {
+	literal_t literal;
 	uint32_t i = 0;
 	int64_t tmp	= 0;
 	double d_tmp = 0, k = 0.125;
@@ -471,8 +478,9 @@ parse_octal_constant(const char *str, uint32_t len, uint64_t *val)
 	}
 
 	if (str[i] != '.') {
-		*val = tmp;
-		return TYPE_LIT_INT;
+		literal.value._int = tmp;
+		literal.type = LITERAL_TYPE_LONG;
+		return literal;
 	}
 
 	++i;
@@ -484,13 +492,16 @@ parse_octal_constant(const char *str, uint32_t len, uint64_t *val)
 		++i;
 	}
 
-	*((double *)val) = d_tmp;
-	return TYPE_LIT_FLOAT;
+	literal.value._float = d_tmp;
+	literal.type = LITERAL_TYPE_DOUBLE;
+
+	return literal;
 }
 
-static type_literal_type_t
+static literal_t
 parse_hex_constant(const char *str, uint32_t len, uint64_t *val)
 {
+	literal_t literal;
 	uint32_t i = 0;
 	int64_t tmp = 0;
 
@@ -505,11 +516,12 @@ parse_hex_constant(const char *str, uint32_t len, uint64_t *val)
 		++i;
 	}
 
-	*val = tmp;
+	literal.value._int = tmp;
+	literal.type = LITERAL_TYPE_LONG;
 
-	// TODO add floating point hex literals
+	// @todo: add floating point hex literals
 
-	return TYPE_LIT_INT;
+	return literal;
 }
 
 static void
@@ -518,7 +530,7 @@ parse_string_literal(const char *str, uint32_t len, char *buffer)
 }
 
 static int32_t
-parse_multichar_constant(const lex_instance_t *in, uint32_t len)
+parse_multichar_constant(const lexer_t *in, uint32_t len)
 {
 	syntax_warning(err_loc(in), "multi-character constant");
 
@@ -529,11 +541,11 @@ parse_multichar_constant(const lex_instance_t *in, uint32_t len)
 	return in->curr[len - 1];
 }
 
-static int
-parse_char_literal(const lex_instance_t *in, uint32_t len)
+static uint32_t
+parse_char_literal(const lexer_t *lexer, uint32_t len)
 {
 	uint64_t c		= 0;
-	const char *str = in->curr;
+	const char *str = lexer->curr;
 
 	switch (len) {
 		case 1: return str[0];
@@ -564,10 +576,10 @@ parse_char_literal(const lex_instance_t *in, uint32_t len)
 						parse_hex_constant(str + 2, len - 2, &c);
 						return c;
 					default:
-						syntax_error(err_loc(in), "Invalid escape sequence");
+						syntax_error(err_loc(lexer), "Invalid escape sequence");
 				}
 			} else
-				return parse_multichar_constant(in, len);
+				return parse_multichar_constant(lexer, len);
 			break;
 
 		case 3:
@@ -588,30 +600,30 @@ parse_char_literal(const lex_instance_t *in, uint32_t len)
 						parse_hex_constant(str + 2, len - 2, &c);
 						return c;
 					case 'u':
-						syntax_error(err_loc(in),
+						syntax_error(err_loc(lexer),
 									 "Unicode is yet to be implemented");
 						return 0;
 					default:
-						syntax_error(err_loc(in), "Invalid escape sequence");
+						syntax_error(err_loc(lexer), "Invalid escape sequence");
 						return 0;
 				}
 			} else
-				return parse_multichar_constant(in, len);
+				return parse_multichar_constant(lexer, len);
 			break;
 
 		case 8:
 			if (str[0] == '\\') {
 				if (str[1] == 'U') {
-					syntax_error(err_loc(in),
+					syntax_error(err_loc(lexer),
 								 "Unicode is yet to be implemented");
 				}
 			} else {
-				return parse_multichar_constant(in, len);
+				return parse_multichar_constant(lexer, len);
 			}
 			break;
 
 		default:
-			return parse_multichar_constant(in, len);
+			return parse_multichar_constant(lexer, len);
 	}
 
 	assert(false);
@@ -865,23 +877,22 @@ lookup_symbol(const char *str, uint32_t *symbol_len)
 /* ================================================================================= */
 
 err_location_t
-err_loc(const lex_instance_t *lex_in)
+err_loc(const lexer_t *lexer)
 {
-	err_location_t loc = { 
-		.line = lex_in->line,
-		.col = lex_in->col,
-		.filename = lex_in->filename
+	err_location_t loc = {
+		.line = lexer->line,
+		.col = lexer->col,
+		.filename = lexer->filename
 	};
 
 	return loc;
 }
 
-lex_instance_t
-lex_create_instance(const char *filename)
+void
+f_create_lexer(lexer_t *lexer, const char *filename)
 {
-	uint32_t filename_size;
-	size_t file_size;
-	lex_instance_t lex_in;
+	size_t file_size, filename_size;
+
 	FILE *file = fopen(filename, "r");
 
 	if (!file) {
@@ -892,119 +903,108 @@ lex_create_instance(const char *filename)
 	file_size = ftell(file);
 	rewind(file);
 
-	lex_in.start = c_malloc(file_size);
-	lex_in.curr = lex_in.start;
-	lex_in.end	= lex_in.start + file_size;
+	lexer->start = c_malloc(file_size);
+	lexer->curr = lexer->start;
+	lexer->end	= lexer->start + file_size;
 
 	filename_size = strlen(filename);
-	lex_in.filename  = c_malloc(filename_size);
-	strncpy(lex_in.filename, filename, filename_size);
+	lexer->filename = c_malloc(filename_size);
+	strncpy(lexer->filename, filename, filename_size);
 
-	lex_in.line = 1;
-	lex_in.col = 1;
+	lexer->line = 0;
+	lexer->col = 0;
 
-	if (!fread(lex_in.start, 1, file_size, file)) {
+	if (!fread(lexer->start, 1, file_size, file)) {
 		fatal_error("Failure reading %s", filename);
 	}
 
 	fclose(file);
 
-	return lex_in;
+	/* why is this needed? */
+	f_next_token(lexer);
 }
 
 void
-lex_destroy_instance(lex_instance_t *in)
+f_destroy_lexer(lexer_t *lexer)
 {
-	c_free(in->start);
-	c_free(in->filename);
+	c_free(lexer->start);
+	c_free(lexer->filename);
 
-	in->col	  = 0;
-	in->line  = 0;
-	in->start = NULL;
-	in->curr  = NULL;
-	in->end	  = NULL;
+	lexer->col		= 0;
+	lexer->line		= 0;
+	lexer->start	= NULL;
+	lexer->curr		= NULL;
+	lexer->end		= NULL;
 }
 
 
 lex_token_t
-lex_next_token(frontend_t *f)
+f_next_token(lexer_t *lexer)
 {
 	char c;
 	uint32_t token_len;
-	enum type_literal_type lit_type;
-	type_info_t suffix_type;
-	lex_instance_t *lex = &f->lex;
+	suffix_flags_t suffix;
 
-	c = skip_whitespace_and_comments(lex);
 
-	f->lex.last_token = f->lex.curr_token;
-	f->lex.curr_token = f->lex.next_token;
+	c = skip_whitespace_and_comments(lexer);
+
+	lexer->last_token = lexer->curr_token;
+	lexer->curr_token = lexer->next_token;
 
 	if (isalpha(c) || c == '_') {
-		token_len = word_len(lex);
-		lex->next_token.hash = sym_hash(lex->curr, token_len);
-		lex->next_token.type = lookup_keyword(lex->next_token.hash, token_len);
-		skip(lex, token_len);
-	} else if (isdigit(c) || (c == '.' && isdigit(lex->curr[1]))) {
-		lex->next_token.type = TOK_LITERAL;
+		token_len = word_len(lexer);
+		lexer->next_token.hash = sym_hash(lexer->curr, token_len);
+		lexer->next_token.type = lookup_keyword(lexer->next_token.hash, token_len);
+		skip(lexer, token_len);
+	} else if (isdigit(c) || (c == '.' && isdigit(lexer->curr[1]))) {
+		lexer->next_token.type = TOK_LITERAL;
 
-		token_len = number_len(lex);
+		token_len = number_len(lexer);
 
-		lit_type = parse_decimal_constant(lex->curr, token_len,
-			&lex->next_token.literal.value.val_int);
-		
-		/* set type */
-		lex->next_token.literal.type = type_deduct_from_literal(
-			lex->next_token.literal.value,
-			lit_type
-		);
+		lexer->next_token.literal = parse_decimal_constant(lexer->curr, token_len);
 
 		/* skip the number */
-		skip(lex, token_len);
+		skip(lexer, token_len);
 
-		/* parse suffix */				
-		token_len = word_len(lex);
+		/* parse suffix */
+		token_len = word_len(lexer);
 
 		if (token_len) {
-			suffix_type = parse_suffix(lex, token_len);
+			suffix = parse_suffix(lexer, token_len);
 
-			lex->next_token.literal.type = type_adapt_to_suffix(suffix_type,
-					lex->next_token.literal.type, err_loc(lex));
+			type_adapt_to_suffix(&lexer->next_token.literal, suffix, err_loc(lexer));
 
-			skip(lex, token_len);
+			skip(lexer, token_len);
 		}
-		
+
 	} else if (c == '"') {
 		/* @todo: add parsing for strings, and remember deducting the type */
-		lex->next_token.type = TOK_LITERAL;
+		lexer->next_token.type = TOK_LITERAL;
 
-		next(lex);
+		next(lexer);
 
-		token_len = string_len(lex);
+		token_len = string_len(lexer);
 
-		skip(lex, token_len + 1);
+		skip(lexer, token_len + 1);
 
 	} else if (c == '\'') {
-		lex->next_token.type = TOK_LITERAL;
+		lexer->next_token.type = TOK_LITERAL;
 
-		next(lex);
-		token_len = char_len(lex);
+		next(lexer);
+		token_len = char_len(lexer);
 
 		/* get value */
-		lex->next_token.literal.value.val_int = parse_char_literal(lex, token_len);
+		lexer->next_token.literal.value._int = parse_char_literal(lexer, token_len);
 
-		/* @note: store as uint32 for now, however should perhaps
-		 * store as uint8 */
-		lex->next_token.literal.type.prim = TYPE_PRIM_INT;
-		lex->next_token.literal.type.prim &= TYPE_SPEC_UNSIGNED;
+		lexer->next_token.literal.type = LITERAL_TYPE_INT;
 
-		skip(lex, token_len + 1);
+		skip(lexer, token_len + 1);
 
 	} else {
-		lex->next_token.type = lookup_symbol(lex->curr, &token_len);
-		skip(lex, token_len);
+		lexer->next_token.type = lookup_symbol(lexer->curr, &token_len);
+		skip(lexer, token_len);
 	}
 
-	lex->next_token.err_loc = err_loc(lex);
-	return lex->curr_token;
+	lexer->next_token.err_loc = err_loc(lexer);
+	return lexer->curr_token;
 }

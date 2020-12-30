@@ -13,12 +13,10 @@ add_executable(Cb
 	src/main.c
 	src/mem.c
 	src/err.c
+	src/type.c
+	src/symbol.c
 
-	src/frontend/sym.c
-	src/frontend/ast.c
-	src/frontend/lex.c
-	src/frontend/type.c
-	src/frontend/frontend.c
-
-	src/backend/ssa.c
+	src/f_parser.c
+	src/f_lexer.c
+	src/f_ast.c
 )
