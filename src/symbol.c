@@ -9,8 +9,9 @@
 sym_hash_t
 sym_hash(const char *key, uint32_t len)
 {
-	uint32_t i;
-	int64_t h = 525201411107845655;
+	uint32_t			i;
+	int64_t				h = 525201411107845655;
+
 	for (i = 0; i < len; ++i) {
 		h ^= key[i];
 		h *= 0x5bd1e9955bd1e995;
@@ -38,7 +39,7 @@ sym_create_table(sym_table_t *table, uint32_t count)
 void
 sym_push_scope(sym_table_t *table)
 {
-	sym_scope_t scope;
+	sym_scope_t				scope;
 
 	scope.start = vec_sym_scope_t_top(&table->scopes).end;
 	scope.end = scope.start;
@@ -52,7 +53,7 @@ sym_push_scope(sym_table_t *table)
 void
 sym_pop_scope(sym_table_t *table)
 {
-	uint32_t new_top = vec_sym_scope_t_top(&table->scopes).start;
+	uint32_t				new_top = vec_sym_scope_t_top(&table->scopes).start;
 
 	printf("pop scope count before %lu\n", table->local_hashes.size);
 
@@ -70,7 +71,7 @@ static void
 check_for_redeclaration(sym_global_t *new, sym_global_t *old,
 					   err_location_t *err_loc)
 {
-	uint32_t i;	
+	uint32_t				i;	
 
 	if (!type_compare(new->type, old->type) ||
 		new->kind != old->kind) {
@@ -97,7 +98,9 @@ check_for_redeclaration(sym_global_t *new, sym_global_t *old,
 sym_id_t
 sym_find_global(const sym_table_t *table, sym_hash_t hash)
 {
-	sym_hash_t *current, *start, *end;
+	sym_hash_t					*current;
+	sym_hash_t					*start;
+	sym_hash_t					*end;
 
 	start = table->global_hashes.data;
 	end = table->global_hashes.data + table->global_hashes.size + 1;
@@ -134,8 +137,8 @@ sym_get_global(sym_table_t *table, sym_id_t id)
 sym_id_t
 sym_declare_global(sym_table_t *table, sym_global_t global, sym_hash_t hash, err_location_t *err_loc)
 {
-	sym_id_t id;
-	sym_global_t *sym;	
+	sym_id_t				id;
+	sym_global_t			*sym;	
 
 	assert(table->scopes.size == 0);
 
@@ -158,8 +161,9 @@ sym_declare_global(sym_table_t *table, sym_global_t global, sym_hash_t hash, err
 sym_id_t
 sym_define_global(sym_table_t *table, sym_global_t global, sym_hash_t hash, err_location_t *err_loc)
 {
-	sym_id_t id;
-	sym_global_t *sym;	
+	sym_id_t					id;
+	sym_global_t				*sym;	
+
 
 	assert(table->scopes.size == 0);
 
@@ -187,7 +191,9 @@ sym_define_global(sym_table_t *table, sym_global_t global, sym_hash_t hash, err_
 sym_id_t
 sym_find_local(const sym_table_t *table, sym_hash_t hash)
 {
-	sym_hash_t *current, *start, *end;
+	sym_hash_t					*current; 
+	sym_hash_t					*start;
+	sym_hash_t					*end;
 
 	/* loop through in reverse */
 	start = table->local_hashes.data + table->local_hashes.size - 1;
@@ -229,7 +235,10 @@ sym_get_local(sym_table_t *table, sym_id_t id)
 static sym_id_t
 find_in_scope(sym_table_t *table, sym_hash_t hash, sym_scope_t scope)
 {
-	sym_hash_t *current, *start, *end;
+	sym_hash_t					*current;
+	sym_hash_t					*start;
+	sym_hash_t					*end;
+
 
 	start = table->local_hashes.data + scope.start;
 	end = table->local_hashes.data + scope.end;
@@ -261,7 +270,8 @@ sym_define_local(sym_table_t *table, sym_local_t local, sym_hash_t hash, err_loc
 void
 sym_check_for_anon_params(const vec_sym_param_t *params)
 {
-	uint32_t i;
+	uint32_t					i;
+
 
 	for (i = 0; i < params->size; ++i) {
 		if (params->data[i].hash == SYM_NULL_HASH) {
@@ -273,8 +283,10 @@ sym_check_for_anon_params(const vec_sym_param_t *params)
 void
 sym_check_for_duplicate_params(const vec_sym_param_t *params)
 {
-	uint32_t i, j;
-	sym_hash_t hash;
+	uint32_t					i;
+	uint32_t					j;
+	sym_hash_t					hash;
+
 
 	for (i = 0; i < params->size; ++i) {
 		hash = params->data[i].hash;
@@ -295,8 +307,8 @@ sym_check_for_duplicate_params(const vec_sym_param_t *params)
 void
 sym_add_params_to_scope(sym_table_t *table, const vec_sym_param_t *params)
 {
-	uint32_t i;
-	sym_local_t local;
+	uint32_t					i;
+	sym_local_t					local;
 
 	local.kind = SYM_LOCAL_KIND_PARAMETER;
 
@@ -306,24 +318,28 @@ sym_add_params_to_scope(sym_table_t *table, const vec_sym_param_t *params)
 	}
 }
 
-/* return global or local entry */
-void*
-sym_get_entry(sym_table_t *table, sym_id_t id)
+
+type_info_t
+sym_get_type_info(sym_table_t *table, sym_id_t id)
 {
 	if (id > 0) {
-		return sym_get_local(table, id);
-	} else if (id < 0) {
-		return sym_get_global(table, id);
-	} else {
-		assert(false);
+		return sym_get_local(table, id)->type;
 	}
+	else if (id < 0)
+	{
+		return sym_get_global(table, id)->type;
+	}
+
+	assert(false);
 }
+
 
 /* looks through both locals and globals */
 sym_id_t
 sym_find_id(const sym_table_t *table, sym_hash_t hash)
 {
-	sym_id_t id;
+	sym_id_t					id;
+
 
 	id = sym_find_local(table, hash);
 

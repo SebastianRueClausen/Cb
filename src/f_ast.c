@@ -1,5 +1,7 @@
 #include "f_ast.h"
 
+#include "f_parser.h"
+
 #include <stdio.h>
 
 #define DEBUG 1 
@@ -66,6 +68,18 @@ f_ast_type_to_str(ast_type_t type)
 }
 
 #endif
+
+ast_node_t*
+f_make_ast_node(parser_t *parser, ast_type_t type, ast_node_t *l, ast_node_t *c, ast_node_t *r)
+{
+	ast_node_t *node	= mem_pool_alloc(&parser->pool, sizeof(ast_node_t));
+	node->left			= l;
+	node->center		= c;
+	node->right			= r;
+	node->type			= type;
+
+	return node;
+}
 
 
 /* @debug: make this easier to read in the console */

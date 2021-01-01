@@ -229,6 +229,7 @@ static void
 skip(lexer_t *in, uint32_t n)
 {
 	uint32_t i;
+
 	for (i = 0; i < n; ++i) {
 		next(in);
 	}
@@ -299,8 +300,8 @@ skip_whitespace_and_comments(lexer_t *in)
 static int
 word_len(const lexer_t *in)
 {
-	uint32_t i = 0;
-	const char *str = in->curr;
+	uint32_t					i = 0;
+	const char					*str = in->curr;
 
 	while (str[i]) {
 		if (isalpha(str[i]) || str[i] == '_' || isdigit(str[i]))
@@ -316,8 +317,8 @@ word_len(const lexer_t *in)
 static int
 number_len(const lexer_t *in)
 {
-	uint32_t i = 0;
-	const char *str = in->curr;
+	uint32_t				i = 0;
+	const char				*str = in->curr;
 
 	while (str[i]) {
 		if (isdigit(str[i]) || str[i] == '.')
@@ -333,8 +334,8 @@ number_len(const lexer_t *in)
 static uint32_t
 string_len(const lexer_t *in)
 {
-	uint32_t i = 0;
-	const char *str = in->curr;
+	uint32_t				i = 0;
+	const char				*str = in->curr;
 
 	while (str[i]) {
 		if (str[i] != '"')
@@ -350,8 +351,9 @@ string_len(const lexer_t *in)
 static uint32_t
 char_len(const lexer_t *in)
 {
-	uint32_t i = 0, slashes = 0;
-	const char *str = in->curr;
+	uint32_t				i = 0;
+	uint32_t				slashes = 0;
+	const char				*str = in->curr;
 
 	while (str[i]) {
 		if (str[i] == '\'') {
@@ -379,8 +381,8 @@ char_len(const lexer_t *in)
 static suffix_flags_t
 parse_suffix(lexer_t *lexer, uint32_t len)
 {
-	suffix_flags_t flags = 0;
-	uint32_t i;
+	suffix_flags_t			flags = 0;
+	uint32_t				i;
 
 	if (len > MAX_SUFFIX_LEN) {
 		syntax_error(err_loc(lexer), "invalid suffix");
@@ -431,10 +433,11 @@ parse_suffix(lexer_t *lexer, uint32_t len)
 static literal_t
 parse_decimal_constant(const char *str, uint32_t len)
 {
-	literal_t literal;
-	uint32_t i = 0;
-	int64_t tmp	= 0;
-	double d_tmp = 0, k = 0.1;
+	literal_t				literal;
+	uint32_t				i = 0;
+	int64_t					tmp	= 0;
+	double					d_tmp = 0;
+	double					k = 0.1;
 
 	while (i != len && str[i] != '.') {
 		tmp = tmp * 10 + str[i] - '0';
@@ -465,12 +468,13 @@ parse_decimal_constant(const char *str, uint32_t len)
 }
 
 static literal_t
-parse_octal_constant(const char *str, uint32_t len, uint64_t *val)
+parse_octal_constant(const char *str, uint32_t len)
 {
-	literal_t literal;
-	uint32_t i = 0;
-	int64_t tmp	= 0;
-	double d_tmp = 0, k = 0.125;
+	literal_t				literal;
+	uint32_t				i = 0;
+	int64_t					tmp	= 0;
+	double					d_tmp = 0;
+	double					k = 0.125;
 
 	while (i != len && str[i] != '.') {
 		tmp = tmp * 8 + str[i] - '0';
@@ -499,11 +503,11 @@ parse_octal_constant(const char *str, uint32_t len, uint64_t *val)
 }
 
 static literal_t
-parse_hex_constant(const char *str, uint32_t len, uint64_t *val)
+parse_hex_constant(const char *str, uint32_t len)
 {
-	literal_t literal;
-	uint32_t i = 0;
-	int64_t tmp = 0;
+	literal_t				literal;
+	uint32_t				i = 0;
+	int64_t					tmp = 0;
 
 	while (i != len) {
 		if (str[i] >= 'a' && str[i] <= 'f') {
@@ -544,8 +548,8 @@ parse_multichar_constant(const lexer_t *in, uint32_t len)
 static uint32_t
 parse_char_literal(const lexer_t *lexer, uint32_t len)
 {
-	uint64_t c		= 0;
-	const char *str = lexer->curr;
+	const char				*str = lexer->curr;
+
 
 	switch (len) {
 		case 1: return str[0];
@@ -570,11 +574,9 @@ parse_char_literal(const lexer_t *lexer, uint32_t len)
 					case '5':
 					case '6':
 					case '7':
-						parse_octal_constant(str + 1, len - 1, &c);
-						return c;
+						return parse_octal_constant(str + 1, len - 1).value._int;
 					case 'x':
-						parse_hex_constant(str + 2, len - 2, &c);
-						return c;
+						return parse_hex_constant(str + 2, len - 2).value._int;
 					default:
 						syntax_error(err_loc(lexer), "Invalid escape sequence");
 				}
@@ -594,11 +596,9 @@ parse_char_literal(const lexer_t *lexer, uint32_t len)
 					case '5':
 					case '6':
 					case '7':
-						parse_octal_constant(str + 1, len - 1, &c);
-						return c;
+						return parse_octal_constant(str + 1, len - 1).value._int;
 					case 'x':
-						parse_hex_constant(str + 2, len - 2, &c);
-						return c;
+						return parse_hex_constant(str + 2, len - 2).value._int;
 					case 'u':
 						syntax_error(err_loc(lexer),
 									 "Unicode is yet to be implemented");
@@ -879,7 +879,7 @@ lookup_symbol(const char *str, uint32_t *symbol_len)
 err_location_t
 err_loc(const lexer_t *lexer)
 {
-	err_location_t loc = {
+	err_location_t				loc = {
 		.line = lexer->line,
 		.col = lexer->col,
 		.filename = lexer->filename
@@ -891,9 +891,10 @@ err_loc(const lexer_t *lexer)
 void
 f_create_lexer(lexer_t *lexer, const char *filename)
 {
-	size_t file_size, filename_size;
+	size_t					file_size;
+	size_t					filename_size;
 
-	FILE *file = fopen(filename, "r");
+	FILE					*file = fopen(filename, "r");
 
 	if (!file) {
 		fatal_error("%s: No such file", filename);
@@ -941,9 +942,9 @@ f_destroy_lexer(lexer_t *lexer)
 lex_token_t
 f_next_token(lexer_t *lexer)
 {
-	char c;
-	uint32_t token_len;
-	suffix_flags_t suffix;
+	char					c;
+	uint32_t				token_len;
+	suffix_flags_t			suffix;
 
 
 	c = skip_whitespace_and_comments(lexer);

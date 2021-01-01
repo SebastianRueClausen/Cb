@@ -11,6 +11,7 @@
 typedef enum lex_token_type
 {
 	/* special */
+	TOK_NULL,					// used to indicate an array of types and such
 	TOK_UNKNOWN,				// £
 
 	/* constants */
@@ -110,6 +111,8 @@ typedef enum lex_token_type
 
 	TOK_IDENTIFIER,
 	TOK_EOF,
+
+
 	_TOK_COUNT
 
 } lex_token_type_t;

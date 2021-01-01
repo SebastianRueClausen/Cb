@@ -51,12 +51,14 @@ typedef enum ast_type
 	/* assignment */
 	AST_ASSIGN,
 
-	AST_LITERAL,
-
+	/* conditional */
 	AST_IF,
 	AST_WHILE,
 
+	/* primary */
+	AST_LITERAL,
 	AST_IDENTIFIER,
+	AST_FUNCTION_CALL,
 
 	AST_NOP,
 
@@ -97,8 +99,14 @@ typedef struct ast_node
 
 } ast_node_t;
 
+typedef struct parser parser_t;
+
 const char*			f_ast_type_to_str(ast_type_t type);
 void				f_print_ast(ast_node_t* node, uint32_t level);
 void				f_print_ast_postorder(ast_node_t *node);
+
+ast_node_t*			f_make_ast_node(parser_t *parser, ast_type_t type,
+									ast_node_t *left, ast_node_t *center,
+									ast_node_t *right);
 
 #endif

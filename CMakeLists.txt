@@ -18,5 +18,6 @@ add_executable(Cb
 
 	src/f_parser.c
 	src/f_lexer.c
+	src/f_expr.c
 	src/f_ast.c
 )

@@ -124,8 +124,8 @@ sym_id_t			sym_find_local(const sym_table_t *table, sym_hash_t hash);
 sym_local_t*		sym_get_local(sym_table_t *table, sym_id_t id);
 sym_id_t			sym_define_local(sym_table_t *table, sym_local_t local, sym_hash_t hash, err_location_t *err_loc);
 
-void*				sym_get_entry(sym_table_t *table, sym_id_t id);
 sym_id_t			sym_find_id(const sym_table_t *table, sym_hash_t hash);
+type_info_t			sym_get_type_info(sym_table_t *table, sym_id_t id);
 
 void				sym_push_scope(sym_table_t *table);
 void				sym_pop_scope(sym_table_t *table);

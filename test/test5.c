@@ -24,6 +24,6 @@ float test(signed short, float);
 float test(signed short u, float s)
 {
 	while (s)
-		--u;
+		--s;
 }
 

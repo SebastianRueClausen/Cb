@@ -112,6 +112,8 @@ run_test3()
 
 int main()
 {
+	printf("lex token count %i\n", _TOK_COUNT);
+
 	ast_node_t *tree;
 
 	sym_table_t table;
