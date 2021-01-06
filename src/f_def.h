@@ -39,7 +39,7 @@ typedef struct literal
 		/* becomes int */
 		/* LITERAL_TYPE_CHAR */	
 
-	}						type;
+	} type;
 
 	value_t					value;
 

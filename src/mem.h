@@ -4,41 +4,39 @@
 #include <stddef.h>
 
 /* memory */
-void*
-c_malloc(size_t size);
+void *c_malloc(size_t size);
 
-void*
-c_realloc(void *ptr, size_t size);
+void *c_realloc(void *ptr, size_t size);
 
-void
-c_free(void *ptr);
+void c_free(void *ptr);
 
 
 /* pool allocator */
+typedef char             byte_t;
+typedef struct mem_block mem_block_t;
+
 typedef struct mem_block
 {
-	char						*start;	
-	char						*top;
-	char						*end;
-	
-	struct mem_block			*prev;
-}
-mem_block_t;
+    byte_t *start;
+    byte_t *top;
+    byte_t *end;
+
+    mem_block_t *next;
+
+} mem_block_t;
 
 typedef struct mem_pool
 {
-	size_t						block_size;
-	struct mem_block			*blocks;
-}
-mem_pool_t;
+    size_t       block_size;
+    mem_block_t *first;
+    mem_block_t *last;
 
-mem_pool_t
-mem_pool_create(size_t block_size);
+} mem_pool_t;
 
-void
-mem_pool_destroy(mem_pool_t *pool);
-
-void*
-mem_pool_alloc(mem_pool_t *pool, size_t size);
+mem_pool_t mem_pool_create(size_t block_size);
+void       mem_pool_destroy(mem_pool_t *pool);
+void *     mem_pool_alloc(mem_pool_t *pool, size_t size);
+void       mem_pool_free(mem_pool_t *pool, void *ptr);
+void	   mem_pool_free_all(mem_pool_t *pool);
 
 #endif

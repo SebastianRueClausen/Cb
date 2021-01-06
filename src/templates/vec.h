@@ -54,7 +54,7 @@ static inline void
 TEMPLATE_SIGNATURE(VEC_SIGNATURE, resize)(VEC_SIGNATURE *vec, size_t size)
 {
 	/* only allow downsizeing for now */
-	assert(size < vec->size);
+	assert(size <= vec->size);
 
 	vec->size = size;
 }

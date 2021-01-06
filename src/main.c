@@ -1,6 +1,7 @@
 #include "f_lexer.h"
 #include "f_parser.h"
 #include "f_ast.h"
+#include "f_expr.h"
 
 #include <stdio.h>
 #include <assert.h>
@@ -112,8 +113,6 @@ run_test3()
 
 int main()
 {
-	printf("lex token count %i\n", _TOK_COUNT);
-
 	ast_node_t *tree;
 
 	sym_table_t table;
@@ -126,16 +125,20 @@ int main()
 
 	printf("%i\n", f_next_token(&lexer).type);
 
-	printf("line %u\n", lexer.col);
-
 	tree = f_generate_ast(&parser);
 
 	while (tree) {
 
 		printf("== FUNC ==\n");
 		f_print_ast(tree, 0);
+		f_print_ast_postorder(tree);
 		printf("\n");
-	
+
+		tree = f_make_ast_node(&parser, AST_NOP, tree, NULL, NULL);
+		// check_argument_list(&parser, tree);
+
+		mem_pool_free_all(&parser.pool);
+
 		tree = f_generate_ast(&parser);
 	}
 
