@@ -111,6 +111,8 @@ run_test3()
 
 #endif
 
+#include "f_type.h"
+
 int main()
 {
 	ast_node_t *tree;
@@ -123,16 +125,27 @@ int main()
 	f_create_lexer(&lexer, "../test/test5.c");
 	f_create_parser(&parser, &lexer, &table);
 
-	printf("%i\n", f_next_token(&lexer).type);
+	type_t left = {
+		.primitive = TYPE_CHAR,
+		.indirection = 1,
+	};
+
+	type_t right = {
+		.primitive = TYPE_CHAR,
+		.indirection = 0,
+	};
+
+	type_t s = f_get_expr_type(left, right, AST_PRE_DECREMENT, &lexer.curr_token.err_loc);
+	f_print_type(s);
 
 	tree = f_generate_ast(&parser);
 
 	while (tree) {
 
-		printf("== FUNC ==\n");
-		f_print_ast(tree, 0);
-		f_print_ast_postorder(tree);
-		printf("\n");
+		// printf("== FUNC ==\n");
+		// f_print_ast(tree, 0);
+		// f_print_ast_postorder(tree);
+		// printf("\n");
 
 		tree = f_make_ast_node(&parser, AST_NOP, tree, NULL, NULL);
 		// check_argument_list(&parser, tree);

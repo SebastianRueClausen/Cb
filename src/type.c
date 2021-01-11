@@ -7,6 +7,7 @@
 static void
 deduct_prim(type_info_t *type, err_location_t *err_loc)
 {
+
     assert(type->prim == TYPE_PRIM_NONE);
 
     if (type->spec & TYPE_SPEC_UNSIGNED)

@@ -80,6 +80,7 @@ f_make_ast_node(parser_t *parser, ast_type_t type, ast_node_t *l, ast_node_t *c,
     node->center     = c;
     node->right      = r;
     node->type       = type;
+	node->expr_type  = NULL_TYPE_INFO;
 
     return node;
 }

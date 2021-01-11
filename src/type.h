@@ -22,7 +22,6 @@ typedef enum type_spec
 
 } type_spec_t;
 
-
 typedef enum type_prim
 {
     TYPE_PRIM_NONE,

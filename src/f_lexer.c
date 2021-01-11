@@ -1017,6 +1017,7 @@ lookup_symbol(const char *str, uint32_t *symbol_len)
         *symbol_len = 1;
         return TOK_KOLON;
     case '?':
+		/* @todo: add support for trigraph sequence */
         *symbol_len = 1;
         return TOK_QUERY;
     case '\0':

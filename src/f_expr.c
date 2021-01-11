@@ -91,20 +91,6 @@ ast_get_type_info(parser_t *parser, ast_node_t *node)
 }
 
 inline static ast_node_t *
-make_unary_node(parser_t *parser, ast_type_t type, ast_node_t *node, type_info_t type_info)
-{
-    ast_node_t *unary_node;
-
-    unary_node = f_make_ast_node(parser, type, node, NULL, NULL);
-
-    /* the type may depent on the type of prefix */
-    unary_node->expr_type = type_info;
-
-    return unary_node;
-}
-
-
-inline static ast_node_t *
 make_literal_node(parser_t *parser, literal_t literal)
 {
     ast_node_t *node = f_make_ast_node(parser, AST_LITERAL, NULL, NULL, NULL);
@@ -114,26 +100,34 @@ make_literal_node(parser_t *parser, literal_t literal)
     return node;
 }
 
-/* assumes the symbol already exists and creates a node */
 inline static ast_node_t *
-make_lvalue_node(parser_t *parser, const token_t *token)
+make_lvalue_node(parser_t *parser, sym_hash_t hash, err_location_t err_loc)
 {
-    sym_id_t    id;
     ast_node_t *node;
+	type_info_t type;
+    sym_id_t    id = sym_find_id(parser->sym_table, hash);
 
-    id = sym_find_id(parser->sym_table, token->hash);
-
-    /* sym will always be defined before we use it here */
     if (id == SYM_ID_NULL)
     {
-        syntax_error(token->err_loc, "use of undeclared identifier");
+        syntax_error(err_loc, "use of undeclared identifier");
     }
 
     node             = f_make_ast_node(parser, AST_IDENTIFIER, NULL, NULL, NULL);
     node->sym_id     = id;
-    node->value_type = AST_LVALUE;
 
-    return node;
+	type = sym_get_type_info(parser->sym_table, id);
+
+	if (type.spec & TYPE_SPEC_CONST)
+	{
+		/* may still become an rvalue */
+		node->value_type = AST_RVALUE;
+	}
+	else
+	{
+		node->value_type = AST_LVALUE;
+	}
+
+	return node;
 }
 
 void
@@ -153,7 +147,6 @@ check_argument_list(parser_t *parser, ast_node_t *func_call)
     {
         if (argument->type == AST_LIST)
         {
-            printf("argument top right %s\n", f_ast_type_to_str(argument->right->type));
             compat = type_compat(argument->right->expr_type, func->function.params.data[i].type);
 
             if (compat == TYPE_COMPAT_INCOMPAT)
@@ -163,7 +156,6 @@ check_argument_list(parser_t *parser, ast_node_t *func_call)
             }
 
             type_print(argument->right->expr_type);
-            printf("\n");
             argument = argument->left;
         }
 
@@ -171,7 +163,6 @@ check_argument_list(parser_t *parser, ast_node_t *func_call)
 		 * the first argument */
         else
         {
-            printf("argument top right %s\n", f_ast_type_to_str(argument->type));
             compat = type_compat(argument->expr_type, func->function.params.data[i].type);
 
             if (compat == TYPE_COMPAT_INCOMPAT)
@@ -243,7 +234,7 @@ make_postfix_operator(parser_t *parser, ast_type_t type, token_t primary_token)
 
     if (is_lvalue(primary_token.type))
     {
-        node      = make_lvalue_node(parser, &primary_token);
+        node      = make_lvalue_node(parser, primary_token.hash, primary_token.err_loc);
         type_info = sym_get_type_info(parser->sym_table, node->sym_id);
     }
     else if (is_rvalue(primary_token.type))
@@ -292,7 +283,7 @@ parse_postfix(parser_t *parser)
     default:
         if (is_lvalue(primary_token.type))
         {
-            return make_lvalue_node(parser, &primary_token);
+            return make_lvalue_node(parser, primary_token.hash, primary_token.err_loc);
         }
         else if (is_rvalue(primary_token.type))
         {
@@ -312,7 +303,6 @@ make_pre_x_crement_expression(parser_t *parser, ast_type_t prefix_type, ast_node
 {
     ast_node_t *expr;
 
-    printf("primary ast type %s\n", f_ast_type_to_str(primary->type));
     if (primary->value_type == AST_RVALUE)
     {
         syntax_error(parser->lexer->last_token.err_loc, "r-value is not "
@@ -338,8 +328,8 @@ make_addressof_expression(parser_t *parser, ast_node_t *primary)
     expr = f_make_ast_node(parser, AST_ADDRESS, primary, NULL, NULL);
     type = ast_get_type_info(parser, primary);
     ++type.indirection;
-    expr->expr_type = type;
-	expr->value_type = AST_LVALUE;
+    expr->expr_type  = type;
+    expr->value_type = AST_LVALUE;
     return expr;
 }
 
@@ -364,46 +354,50 @@ make_dereference_expression(parser_t *parser, ast_node_t *primary)
     }
 
     --type.indirection;
-    expr->expr_type = type;
-	expr->value_type = AST_LVALUE;
+    expr->expr_type  = type;
+    expr->value_type = AST_LVALUE;
     return expr;
 }
 
 static ast_node_t *
 make_prefix_expression(parser_t *parser, ast_type_t prefix_type, ast_node_t *primary)
 {
-	ast_node_t *expr;
-	
+    ast_node_t *expr;
+
     switch (prefix_type)
     {
     case AST_PRE_INCREMENT:
         expr = make_pre_x_crement_expression(parser, AST_PRE_INCREMENT, primary);
+		break;
 
     case AST_PRE_DECREMENT:
         expr = make_pre_x_crement_expression(parser, AST_PRE_INCREMENT, primary);
+		break;
 
     case AST_UNARY_PLUS:
-		expr = f_make_ast_node(parser, AST_UNARY_PLUS, primary, NULL, NULL);
-		expr->value_type = AST_RVALUE;
-		expr->expr_type = ast_get_type_info(parser, primary);		
+        expr             = f_make_ast_node(parser, AST_UNARY_PLUS, primary, NULL, NULL);
+        expr->value_type = AST_RVALUE;
+        expr->expr_type  = ast_get_type_info(parser, primary);
 
-		/* is always signed */
-		expr->expr_type.spec &= ~TYPE_SPEC_UNSIGNED;
-		expr->expr_type.spec |=  TYPE_SPEC_SIGNED;
+        /* is always signed */
+        expr->expr_type.spec &= ~TYPE_SPEC_UNSIGNED;
+        expr->expr_type.spec |= TYPE_SPEC_SIGNED;
         break;
 
     case AST_UNARY_MINUS:
-		expr = f_make_ast_node(parser, AST_UNARY_MINUS, primary, NULL, NULL);
-		expr->value_type = AST_RVALUE;
-		expr->expr_type = ast_get_type_info(parser, primary);		
+        expr             = f_make_ast_node(parser, AST_UNARY_MINUS, primary, NULL, NULL);
+        expr->value_type = AST_RVALUE;
+        expr->expr_type  = ast_get_type_info(parser, primary);
 
-		/* is always signed */
-		expr->expr_type.spec &= ~TYPE_SPEC_UNSIGNED;
-		expr->expr_type.spec |=  TYPE_SPEC_SIGNED;
+        /* is always signed */
+        expr->expr_type.spec &= ~TYPE_SPEC_UNSIGNED;
+        expr->expr_type.spec |= TYPE_SPEC_SIGNED;
         break;
 
     case AST_UNARY_NOT:
-        assert(false);
+        expr                 = f_make_ast_node(parser, AST_UNARY_NOT, primary, NULL, NULL);
+        expr->value_type     = AST_RVALUE;
+        expr->expr_type.prim = TYPE_PRIM_INT;
         return NULL;
 
     case AST_BIT_NOT:
@@ -412,19 +406,21 @@ make_prefix_expression(parser_t *parser, ast_type_t prefix_type, ast_node_t *pri
 
     case AST_DEREF:
         expr = make_dereference_expression(parser, primary);
+		break;
 
     case AST_ADDRESS:
         expr = make_addressof_expression(parser, primary);
+		break;
 
     default:
         assert(false);
     }
 
-	return expr;
+    return expr;
 }
 
 static ast_type_t
-prefix_token_to_ast(token_type_t token_type)
+token_to_prefix_ast_type(token_type_t token_type)
 {
     switch (token_type)
     {
@@ -468,7 +464,7 @@ parse_primary_factor(parser_t *parser)
     }
     else
     {
-        prefix_type = prefix_token_to_ast(token.type);
+        prefix_type = token_to_prefix_ast_type(token.type);
 
         if (prefix_type)
         {
@@ -491,9 +487,6 @@ parse_primary_factor(parser_t *parser)
         }
     }
 
-    printf("exited parser primary factor with current token of type %s\n",
-           tok_debug_str(parser->lexer->curr_token.type));
-
     return tree;
 }
 
@@ -512,131 +505,71 @@ typedef struct operator_info
 } operator_info_t;
 
 
-static const operator_info_t operator_info[_AST_COUNT] =
-{
-	[AST_LIST] =
-	{
-		.precedence = 1,
-		.associavity = ASSOCIAVITY_LEFT_TO_RIGHT,
-	},
+static const operator_info_t operator_info[_AST_COUNT] = {
+    [AST_LIST] = { 1, ASSOCIAVITY_LEFT_TO_RIGHT },
 
-	/* assignment expressions */
-	[AST_ASSIGN] =
-	{
-		.precedence = 2,
-		.associavity = ASSOCIAVITY_RIGHT_TO_LEFT,
-	},
+    /* assignment expressions */
+    [AST_ASSIGN] = { 2, ASSOCIAVITY_RIGHT_TO_LEFT },
 
-	/* additive expressions */
-	[AST_ADD] =
-	{
-		.precedence = 3,
-		.associavity = ASSOCIAVITY_LEFT_TO_RIGHT,
-	},
+    /* additive expressions */
+    [AST_ADD] = { 3, ASSOCIAVITY_LEFT_TO_RIGHT },
+    [AST_MIN] = { 3, ASSOCIAVITY_LEFT_TO_RIGHT },
 
-	[AST_MIN] =
-	{
-		.precedence = 3,
-		.associavity = ASSOCIAVITY_LEFT_TO_RIGHT,
-	},
+    /* multiplicative expressions */
+    [AST_MUL] = { 4, ASSOCIAVITY_LEFT_TO_RIGHT },
+    [AST_DIV] = { 4, ASSOCIAVITY_LEFT_TO_RIGHT },
+    [AST_MOD] = { 4, ASSOCIAVITY_LEFT_TO_RIGHT },
 
-	/* multiplicative expressions */
-	[AST_MUL] =
-	{
-		.precedence = 4,
-		.associavity = ASSOCIAVITY_LEFT_TO_RIGHT,
-	},
+    /* relational expression */
+    [AST_EQUAL]     = { 5, ASSOCIAVITY_LEFT_TO_RIGHT },
+    [AST_NOT_EQUAL] = { 5, ASSOCIAVITY_LEFT_TO_RIGHT },
 
-	[AST_DIV] =
-	{
-		.precedence = 4,
-		.associavity = ASSOCIAVITY_LEFT_TO_RIGHT,
-	},
-
-	[AST_MOD] =
-	{
-		.precedence = 4,
-		.associavity = ASSOCIAVITY_LEFT_TO_RIGHT,
-	},
-
-	/* relational expression */
-	[AST_EQUAL] =
-	{
-		.precedence = 5,
-		.associavity = ASSOCIAVITY_LEFT_TO_RIGHT,
-	},
-
-	[AST_NOT_EQUAL] =
-	{
-		.precedence = 5,
-		.associavity = ASSOCIAVITY_LEFT_TO_RIGHT,
-	},
-
-	/* comparative expression */
-	[AST_LESSER] =
-	{
-		.precedence = 6,
-		.associavity = ASSOCIAVITY_LEFT_TO_RIGHT,
-	},
-
-	[AST_GREATER] =
-	{
-		.precedence = 6,
-		.associavity = ASSOCIAVITY_LEFT_TO_RIGHT,
-	},
-
-	[AST_GREATER_EQUAL] =
-	{
-		.precedence = 6,
-		.associavity = ASSOCIAVITY_LEFT_TO_RIGHT,
-	},
-
-	[AST_LESSER_EQUAL] =
-	{
-		.precedence = 6,
-		.associavity = ASSOCIAVITY_LEFT_TO_RIGHT,
-	},
+    /* comparative expression */
+    [AST_LESSER]        = { 6, ASSOCIAVITY_LEFT_TO_RIGHT },
+    [AST_GREATER]       = { 6, ASSOCIAVITY_LEFT_TO_RIGHT },
+    [AST_GREATER_EQUAL] = { 6, ASSOCIAVITY_LEFT_TO_RIGHT },
+    [AST_LESSER_EQUAL]  = { 6, ASSOCIAVITY_LEFT_TO_RIGHT },
 };
 
-/* adapt types if required, or throw error if not compat */
-static void
+/* adapt types if required, or throw error if not compat,
+ * also returns the type of the expression */
+static type_info_t
 expr_type_check(parser_t *parser, ast_node_t **left, ast_node_t **right)
 {
     type_compat_t compat;
 
+    type_info_t left_type  = ast_get_type_info(parser, *left);
+    type_info_t right_type = ast_get_type_info(parser, *right);
+
     /* we fetch the compatibility of the righ and left nodes */
-    compat = type_compat(ast_get_type_info(parser, *left), ast_get_type_info(parser, *right));
+    compat = type_compat(left_type, right_type);
 
     /* we lookup what to do depent in compat */
     switch (compat)
     {
-    /* if the types a compatible we dont need to do anything */
     case TYPE_COMPAT_COMPAT:
-        return;
+        /* @todo: there is some kind of type precedence where float has
+		 * higher precedence than int, double higher than float,
+		 * unsigned higher than signed esc. */
+        return left_type;
 
-    /* we promote the left or the right */
     case TYPE_COMPAT_PROMOTE_LEFT:
         *left = f_make_ast_node(parser, AST_PROMOTE, *left, NULL, NULL);
-        break;
+        /* the promoted */
+        return right_type;
 
     case TYPE_COMPAT_PROMOTE_RIGHT:
         *right = f_make_ast_node(parser, AST_PROMOTE, *right, NULL, NULL);
-        break;
+        return left_type;
 
     /* if they are incompatible we throw a syntax error */
     case TYPE_COMPAT_INCOMPAT:
-        printf("expr type incompat report\n");
-        printf("left type info:\n");
-        type_print(ast_get_type_info(parser, *left));
-        printf("\n");
-
-        printf("righ type info:\n");
-        type_print(ast_get_type_info(parser, *right));
-        printf("\n");
-
         syntax_error(parser->lexer->curr_token.err_loc, "type incompatible in "
                                                         "expression");
-        break;
+        assert(false);
+
+    default:
+        assert(false);
     }
 }
 
@@ -686,7 +619,7 @@ f_parse_expression(parser_t *parser, int32_t prev_prec, token_type_t terminator)
         right = f_parse_expression(parser, op_info.associavity, terminator);
 
         /* check type compat, and modify the type required */
-        expr_type_check(parser, &left, &right);
+        expr_type = expr_type_check(parser, &left, &right);
 
         token = parser->lexer->curr_token;
 
@@ -699,11 +632,9 @@ f_parse_expression(parser_t *parser, int32_t prev_prec, token_type_t terminator)
 
         left = f_make_ast_node(parser, op_type, left, NULL, right);
 
-        /* @todo: make the type dependent on more than the primary factor */
         left->expr_type  = expr_type;
         left->value_type = AST_RVALUE;
 
-        /* we set the type of the expression */
         if (token.type == terminator)
         {
             return left;

@@ -20,4 +20,5 @@ add_executable(Cb
 	src/f_lexer.c
 	src/f_expr.c
 	src/f_ast.c
+	src/f_type.c
 )

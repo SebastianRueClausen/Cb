@@ -104,7 +104,6 @@ parse_type(parser_t *parser)
 {
     type_info_t type = NULL_TYPE_INFO;
 
-
     for (;;)
     {
         switch (parser->lexer->curr_token.type)
@@ -224,14 +223,10 @@ parse_parameter_list(parser_t *parser)
             return vec;
 
         default:
-            printf("token type: %s\n", tok_debug_str(parser->lexer->curr_token.type));
+            // printf("token type: %s\n", tok_debug_str(parser->lexer->curr_token.type));
             syntax_error(parser->lexer->curr_token.err_loc, "parameter unexpectet");
             break;
-        }
-    }
-}
-
-
+        } } }
 static ast_node_t *
 parse_function(parser_t *parser, sym_global_t global, sym_hash_t hash)
 {
@@ -662,7 +657,6 @@ f_generate_ast(parser_t *parser)
 
         default:
             // printf("parsing token: %s\n", tok_debug_str(token.type));
-            printf("got here\n");
             syntax_error(parser->lexer->curr_token.err_loc, "failure parsing");
         }
     }
